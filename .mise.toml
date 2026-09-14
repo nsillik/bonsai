@@ -1,0 +1,28 @@
+# Cross-platform build tooling.  Windows is deliberately absent: it keeps MinGW
+# (see .github/workflows/build.yml) and is the least-exercised path.
+#
+# On macOS the real toolchain dependency is the Xcode Command Line Tools, which
+# mise cannot install:
+#
+#   xcode-select --install
+#
+# macOS therefore uses the system Apple clang and declares no bootstrap
+# packages -- Cocoa, OpenGL and IOKit come from the SDK.  The clang pin below is
+# for Linux only; installing it on macOS would shadow Apple clang.
+#
+#   mise bootstrap packages apply && mise install
+#
+# See docs/01_build_process.md.
+
+[tools]
+clang = { version = "18.1.8", os = ["linux"] }
+
+[bootstrap.packages]
+"apt:libx11-dev"    = { os = "linux" }
+"apt:freeglut3-dev" = { os = "linux" }
+
+[tasks.build]
+run = "./make.sh"
+
+[tasks.test]
+run = "./make.sh RunTests"

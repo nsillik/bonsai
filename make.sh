@@ -394,9 +394,9 @@ SetBuildAllFlags() {
   BuildExecutables=1
   BuildTests=1
 
-  # NOTE(Jesse): These only build on linux.  I'm honestly not sure if it's
-  # worth getting them to build on Windows
-  if [ $Platform == "Linux" ]; then
+  # NOTE(nsillik): These only build on linux and macOS.  I'm honestly not sure if
+  # it's worth getting them to build on Windows
+  if [ $Platform == "Linux" ] || [ $Platform == "macOS" ]; then
     BuildDebugOnlyTests=1
   fi
 
@@ -526,9 +526,9 @@ if [ $BundleRelease -eq 1 ]; then
     .root_marker                                                           \
     settings.init                                                          \
     white.bmp                                                              \
-    texture_atlas_0.bmp > "$Platform""_x86_64_release.tar.gz"
+    texture_atlas_0.bmp > "$Platform""_""$ARCH""_release.tar.gz"
 
- [ $? -ne 0 ] && echo "$Failed $Platform""_x86_64_release.tar.gz" && exit 1
+ [ $? -ne 0 ] && echo "$Failed $Platform""_""$ARCH""_release.tar.gz" && exit 1
 
-  echo "$Success $Platform""_x86_64_release.tar.gz"
+  echo "$Success $Platform""_""$ARCH""_release.tar.gz"
 fi
