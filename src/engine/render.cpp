@@ -1713,7 +1713,7 @@ MultiDrawIndirect(u32 DrawCommandsAt, DrawArraysIndirectCommand *DrawCommands, r
 
   auto GL = GetGL();
   local_persist u32 IndirectDrawBuffer = 0;
-  local_persist u32 MatrixStorageBuffer = 0;
+  local_persist texture_buffer_binding TransformBufferBinding = {};
 
   u32 RequiredIndirectDrawBufferSize = Cast(GLsizeiptr, sizeof(DrawArraysIndirectCommand))*DrawCommandsAt;
   u32 RequiredMatrixBufferSize = Cast(GLsizeiptr, sizeof(render_matrix_pair))*DrawCommandsAt;
@@ -1723,30 +1723,57 @@ MultiDrawIndirect(u32 DrawCommandsAt, DrawArraysIndirectCommand *DrawCommands, r
     GL->GenBuffers(1, &IndirectDrawBuffer);
   }
 
-  if (MatrixStorageBuffer == 0)
-  {
-    GL->GenBuffers(1, &MatrixStorageBuffer);
-  }
-
   GL->BindBuffer(GL_DRAW_INDIRECT_BUFFER, IndirectDrawBuffer);
   AssertNoGlErrors;
 
   GL->BufferData(GL_DRAW_INDIRECT_BUFFER, RequiredIndirectDrawBufferSize, DrawCommands, GL_DYNAMIC_DRAW);
   AssertNoGlErrors;
 
-  GL->BindBuffer(GL_SHADER_STORAGE_BUFFER, MatrixStorageBuffer);
+  // NOTE(nsillik)(macos): This was a glBindBufferBase(GL_SHADER_STORAGE_BUFFER) feeding a std430
+  // block.  A texture buffer is the same data read as texels, and is available on a 4.1 core
+  // context where shader storage buffers are not.
+  BindTextureBuffer(&TransformBufferBinding, "TransformBuffer", MatrixData, RequiredMatrixBufferSize);
+
+  // NOTE(nsillik)(macos): glMultiDrawArraysIndirect is GL 4.3 and is absent on macOS.  The shader
+  // reads its transforms through DrawIndex rather than gl_DrawID (GLSL 4.60), and the index is what
+  // this loop supplies, so the loop is required on every platform and not only as a fallback --
+  // Phase 6 gets the single-call form back, with gl_DrawIndex, under Vulkan.  Do not reintroduce
+  // glMultiDrawArraysIndirect here: the shader no longer has gl_DrawID to read the transform with.
+  //
+  // Cost is one glUniform1i and one draw call per chunk, in place of one call for all of them.
+  {
+    TIMED_NAMED_BLOCK(MultiDrawArraysIndirect);
+
+    // The program is bound once by the caller and cannot change mid-list, so it is queried and
+    // resolved once rather than 128 times per frame.
+    GLuint Program = 0;
+    GL->GetIntegerv(GL_CURRENT_PROGRAM, Cast(s32*, &Program));
+    Assert(Program);
+
+    s32 DrawIndexUniform = GL->GetUniformLocation(Program, "DrawIndex");
+
+    // NOTE(nsillik): A miss would leave DrawIndex at 0 for every draw, so every chunk would be
+    // drawn with the first chunk's transform -- dense geometry in the wrong places, not an error.
+    Assert(DrawIndexUniform >= 0);
+
+    // glDrawArraysIndirect requires the command to be 4-byte aligned; this is what keeps each
+    // command in the array so, since the offset below is served in bytes.
+    static_assert(sizeof(DrawArraysIndirectCommand) % 4 == 0);
+
+    RangeIterator_t(u32, DrawIndex, DrawCommandsAt)
+    {
+      GL->Uniform1i(DrawIndexUniform, s32(DrawIndex));
+      GL->DrawArraysIndirect(GL_TRIANGLES, Cast(void*, umm(DrawIndex*sizeof(DrawArraysIndirectCommand))));
+      AssertNoGlErrors;
+    }
+  }
+
+  GL->ActiveTexture(GL_TEXTURE0 + SHADER_TEXTURE_BUFFER_UNIT);
+  GL->BindTexture(GL_TEXTURE_BUFFER, 0);
+  GL->ActiveTexture(GL_TEXTURE0);
   AssertNoGlErrors;
 
-  GL->BufferData(GL_SHADER_STORAGE_BUFFER, RequiredMatrixBufferSize, MatrixData, GL_DYNAMIC_DRAW);
-  AssertNoGlErrors;
-
-  GL->BindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, MatrixStorageBuffer);
-  AssertNoGlErrors;
-
-  GL->MultiDrawArraysIndirect(GL_TRIANGLES, 0, s32(DrawCommandsAt), 0);
-  AssertNoGlErrors;
-
-  GL->BindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+  GL->BindBuffer(GL_TEXTURE_BUFFER, 0);
   AssertNoGlErrors;
 }
 
