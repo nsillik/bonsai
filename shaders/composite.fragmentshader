@@ -109,7 +109,16 @@ vec3 agxLook(vec3 val) {
 #if 1
   switch (ToneMappingType)
   {
-    case 3: {} break;
+    // NOTE(nsillik)(macos): This case must not have an empty body.  Apple's core-profile GLSL
+    // compiler segfaults in glpLLVMCGSwitchStatement on `case 3: {} break;` -- measured, and it is
+    // the only reason this shader failed to link at #version 410 core.  Stating the defaults
+    // explicitly keeps the case, keeps it a no-op, and gives the body a statement.
+    case 3:
+    {
+      slope = vec3(1.0);
+      power = vec3(1.0);
+      sat = 1.0;
+    } break;
 
     case 4:
     {
