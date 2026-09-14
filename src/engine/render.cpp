@@ -1712,22 +1712,9 @@ MultiDrawIndirect(u32 DrawCommandsAt, DrawArraysIndirectCommand *DrawCommands, r
   Assert(DrawCommandsAt);
 
   auto GL = GetGL();
-  local_persist u32 IndirectDrawBuffer = 0;
   local_persist texture_buffer_binding TransformBufferBinding = {};
 
-  u32 RequiredIndirectDrawBufferSize = Cast(GLsizeiptr, sizeof(DrawArraysIndirectCommand))*DrawCommandsAt;
   u32 RequiredMatrixBufferSize = Cast(GLsizeiptr, sizeof(render_matrix_pair))*DrawCommandsAt;
-
-  if (IndirectDrawBuffer == 0)
-  {
-    GL->GenBuffers(1, &IndirectDrawBuffer);
-  }
-
-  GL->BindBuffer(GL_DRAW_INDIRECT_BUFFER, IndirectDrawBuffer);
-  AssertNoGlErrors;
-
-  GL->BufferData(GL_DRAW_INDIRECT_BUFFER, RequiredIndirectDrawBufferSize, DrawCommands, GL_DYNAMIC_DRAW);
-  AssertNoGlErrors;
 
   // NOTE(nsillik)(macos): This was a glBindBufferBase(GL_SHADER_STORAGE_BUFFER) feeding a std430
   // block.  A texture buffer is the same data read as texels, and is available on a 4.1 core
@@ -1739,6 +1726,14 @@ MultiDrawIndirect(u32 DrawCommandsAt, DrawArraysIndirectCommand *DrawCommands, r
   // this loop supplies, so the loop is required on every platform and not only as a fallback --
   // Phase 6 gets the single-call form back, with gl_DrawIndex, under Vulkan.  Do not reintroduce
   // glMultiDrawArraysIndirect here: the shader no longer has gl_DrawID to read the transform with.
+  //
+  // The commands are also not drawn indirectly.  BufferIndirectDrawCommand always writes
+  // InstanceCount == 1 and the shader takes its transform from the DrawIndex uniform, so a
+  // glDrawArraysIndirect here would be an indirect draw with nothing indirect about it.  Measured:
+  // that call crashes intermittently inside Apple's driver -- SIGSEGV in
+  // GLRResourceList::addResource, from gldRenderVertexArray, reached only via
+  // glDrawArraysIndirect_GL3Exec -- while the identical draw issued as glDrawArrays did not, in
+  // every run.  The two are equivalent for these commands, so the direct call is what is used.
   //
   // Cost is one glUniform1i and one draw call per chunk, in place of one call for all of them.
   {
@@ -1756,14 +1751,12 @@ MultiDrawIndirect(u32 DrawCommandsAt, DrawArraysIndirectCommand *DrawCommands, r
     // drawn with the first chunk's transform -- dense geometry in the wrong places, not an error.
     Assert(DrawIndexUniform >= 0);
 
-    // glDrawArraysIndirect requires the command to be 4-byte aligned; this is what keeps each
-    // command in the array so, since the offset below is served in bytes.
-    static_assert(sizeof(DrawArraysIndirectCommand) % 4 == 0);
-
     RangeIterator_t(u32, DrawIndex, DrawCommandsAt)
     {
+      DrawArraysIndirectCommand *DrawCommand = DrawCommands + DrawIndex;
+
       GL->Uniform1i(DrawIndexUniform, s32(DrawIndex));
-      GL->DrawArraysIndirect(GL_TRIANGLES, Cast(void*, umm(DrawIndex*sizeof(DrawArraysIndirectCommand))));
+      GL->DrawArrays(GL_TRIANGLES, Cast(s32, DrawCommand->First), Cast(s32, DrawCommand->Count));
       AssertNoGlErrors;
     }
   }
