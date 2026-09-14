@@ -27,10 +27,11 @@ What is actually left of Phase 3:
 
 ```bash
 cd external/bonsai_stdlib && git fetch origin && git checkout -b port/macos-phase3 origin/port/macos-phase2
-cd ../..
-cd external/bonsai_debug && git fetch fork && git checkout -b port/macos-phase3 origin/port/macos-phase2
 cd ../..                   && git fetch origin && git checkout -b port/macos-phase3 origin/port/macos-phase2
 ```
+
+`bonsai_debug` is not in the stack and has no PR — only branch it if Phase 3 turns out to need a
+change there, and leave that on the fork branch too (Deviations #16).
 
 Gotchas that cost time in Phase 1 and 2, in order of how expensive they were:
 
@@ -113,31 +114,38 @@ directory), so `git submodule update` ignores it.
 
 ### Branches and PRs
 
-Stacked bottom-up, one branch per phase, in both repos:
+Stacked bottom-up, one branch per phase, in the two repos that hold reviewable changes:
 
 ```
 master
  └─ port/macos               bonsai#1  stdlib#1   Phase 0
      └─ port/macos-phase1    bonsai#2  stdlib#2   Phase 1
+         └─ port/macos-phase2  bonsai#4  stdlib#3  Phase 2
 ```
 
 | Repo | Branch | Head | PR |
 |---|---|---|---|
 | `bonsai` | `port/macos` | `b7ef48c7` | [#1](https://github.com/nsillik/bonsai/pull/1) |
 | `bonsai` | `port/macos-phase1` | `922c1dcf` | [#2](https://github.com/nsillik/bonsai/pull/2) |
-| `bonsai` | `port/macos-phase2` | `5dbcefb5` | pending |
+| `bonsai` | `port/macos-phase2` | `11e2502f` | [#4](https://github.com/nsillik/bonsai/pull/4) |
 | `bonsai_stdlib` | `port/macos` | `6b80224` | [#1](https://github.com/nsillik/bonsai_stdlib/pull/1) |
 | `bonsai_stdlib` | `port/macos-phase1` | `82974dc` | [#2](https://github.com/nsillik/bonsai_stdlib/pull/2) |
-| `bonsai_stdlib` | `port/macos-phase2` | `a7d2dd3` | pending |
-| `bonsai_debug` | `port/macos-phase2` | `8c0cb56` | pending |
+| `bonsai_stdlib` | `port/macos-phase2` | `a7d2dd3` | [#3](https://github.com/nsillik/bonsai_stdlib/pull/3) |
+| `bonsai_debug` | `port/macos-phase2` | `b6ceecb` | **none — deliberate** |
 
-**`bonsai_debug` is now a third fork in the stack.** Phase 2 needed one change there (Deviations
-#13), so `external/bonsai_debug` is pinned at `nsillik/bonsai_debug` `port/macos-phase2` and
-`nsillik/bonsai_debug` must exist for `git submodule update --init --recursive` to resolve.
+**`bonsai_debug` is a third fork, and is deliberately not a PR.** Phase 2 needed one change there
+(Deviations #16) — a one-character assertion relaxation. That does not warrant a third repository in
+the review surface, so per `AGENTS.md` ("if a change belongs upstream, leave it on a fork branch and
+say so") it stays on the fork branch. `external/bonsai_debug` is pinned at
+`nsillik/bonsai_debug` `port/macos-phase2`, and **`nsillik/bonsai_debug` must exist** for
+`git submodule update --init --recursive` to resolve. The branch must stay too: the gitlink points at
+it, so deleting it breaks a fresh clone.
+
+If that commit is ever wanted upstream, it is `b6ceecb` on `port/macos-phase2`, based on `master`.
 
 Linked as GitHub native Stack **#3** (done by hand in the web UI — see Deviations). Merge
-bottom-up; `external/bonsai_stdlib` is pinned at the fork's `port/macos-phase1` (`82974dc`) and must
-be re-pointed at upstream `master` if the stdlib PRs are ever accepted upstream.
+bottom-up; `external/bonsai_stdlib` is pinned at the fork's `port/macos-phase2` (`a7d2dd3`) and must
+be re-pointed at upstream `master` if these PRs are ever accepted upstream.
 
 ### Phase 0 — green base: done
 
@@ -188,7 +196,7 @@ unrelated to the code.
 
 ### Phase 2 — window opens, tests pass: done
 
-`bonsai` `5dbcefb5`, `bonsai_stdlib` `a7d2dd3`, `bonsai_debug` `8c0cb56`. Gate **met**: `./bin/game_loader`
+`bonsai` `11e2502f`, `bonsai_stdlib` `a7d2dd3`, `bonsai_debug` `b6ceecb`. Gate **met**: `./bin/game_loader`
 opens a window, renders terrain and UI, and exits 0.
 
 Local, macOS 26.5.2 / M4 Max, Apple clang 21, x86_64 under Rosetta 2:
@@ -514,12 +522,19 @@ ticks. So any timed region shorter than one tick reads the same value twice, and
 on healthy code — it traps in `~debug_timed_function` as soon as the render thread starts doing work.
 arm64's `cntvct_el0` (Phase 4) ticks at the same rate, so Phase 4 would hit it too, natively.
 
-→ `bonsai_debug` `8c0cb56` relaxes it to `>=`, which still catches a counter that rewinds — the thing
-the assertion was actually protecting — and no longer fires on a counter that is merely coarse. The
-comment there carries the measurement.
+→ `bonsai_debug` `b6ceecb` relaxes it to `>=`, which still catches a counter that rewinds — the thing
+the assertion was actually protecting — and no longer fires on a counter that is merely coarse.
 
-This lands in a **third fork**, `nsillik/bonsai_debug`, which the plan did not anticipate. It is not
-optional on any path that runs the render thread, Phase 4 included.
+This lands in a **third fork**, `nsillik/bonsai_debug`, which the plan did not anticipate.
+
+**It is deliberately not a PR.** The diff is one character plus a three-line comment; a third
+repository in the review surface is the wrong trade for that, and `AGENTS.md` already says what to do
+with a change like this — leave it on a fork branch and say so. `external/bonsai_debug` pins
+`nsillik/bonsai_debug` `port/macos-phase2` (`b6ceecb`, based on `master`), and both the fork and the
+branch have to keep existing or `git submodule update --init --recursive` breaks for a fresh clone.
+
+The change itself is not optional: without it the engine traps in `~debug_timed_function` as soon as
+the render thread starts doing work, on macOS *and* on Phase 4's native arm64.
 
 ### 17. `MaxFragShaderTexUnits` is queried and then never used
 
@@ -949,7 +964,7 @@ but `uc->uc_mcontext->__ss.__rip` on Darwin (`uc_mcontext` is a *pointer* there)
 
 ## Phase 2 — window opens, tests pass
 
-**DONE.** `bonsai` `5dbcefb5`, `bonsai_stdlib` `a7d2dd3`, `bonsai_debug` `8c0cb56`. All six items
+**DONE.** `bonsai` `11e2502f`, `bonsai_stdlib` `a7d2dd3`, `bonsai_debug` `b6ceecb`. All six items
 implemented; the gate is met. See [Progress → Phase 2](#phase-2--window-opens-tests-pass-done) for the
 evidence and the two things deliberately left unverified.
 
@@ -1433,7 +1448,7 @@ These were not anticipated here and have already bitten once. See
 | **Apple's core-profile GLSL compiler segfaults on an empty `case` body.** `case 3: {} break;` takes down `glLinkProgram`; a body of only comments counts as empty, and there is no diagnostic | Check any new shader `switch` by inspection before committing. Statement-in-body, even a self-assignment. Deviations #14 |
 | **A shader compiling is not evidence that it links.** `composite.fragmentshader` passed the plan's "54/56 compile at 410" audit and then crashed the linker | The measured shader audit in [Research findings](#measured-shader-audit-replaces-guesswork-for-phase-3) audited compilation only. Link every pair, not just compile it |
 | **The window and the renderer cannot be verified separately.** Window creation and `GraphicsInit` are the same call chain, so "Phase 2 = window, Phase 3 = renderer" was never a real boundary | Phases were re-cut: Phase 2 landed Phase 3's items 1–5, 7, 8. Deviations #13 |
-| **`GetCycleCount()` is not a cycle counter on every platform.** RDTSC under Rosetta is the 24MHz system timer, so a one-tick-granular assertion fired on healthy code | Assertion relaxed to `>=` in `bonsai_debug` `8c0cb56`, with the measurement in the comment. Phase 4's `cntvct_el0` has the same coarse tick |
+| **`GetCycleCount()` is not a cycle counter on every platform.** RDTSC under Rosetta is the 24MHz system timer, so a one-tick-granular assertion fired on healthy code | Assertion relaxed to `>=` in `bonsai_debug` `b6ceecb`; measurements in Deviations #16. Phase 4's `cntvct_el0` has the same coarse tick |
 | `[NSOpenGLContext update]` needs the CGL lock, and the render thread was holding it for its whole lifetime | Lock scoped to `flushBuffer`. Holding it across frames hangs the first resize. Deviations #13 |
 | Verifying interactive input by posting synthetic events to the user's desktop | Ask the user to press keys and read the engine's own log. Better evidence anyway — it reports the receiving field's name and offset. Deviations #15 |
 | The `.brush` assets on `master` no longer deserialize after 12 commits changed `editor.h`; every brush loads empty | Pre-existing on `master`, not port-specific. Regenerate `brushes/` before treating the world-edit path as verified. Deviations #18 |
