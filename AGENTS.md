@@ -57,13 +57,20 @@ Merge bottom-up.
 fork layout confuse auto-detection, so pass `-R nsillik/bonsai` (or set
 `gh repo set-default nsillik/bonsai` once per clone).
 
-**Do not use `gh stack`.** It resolves the repository to the *parent* of the
-fork — `gh stack init` writes `github.com:scallyw4g/bonsai` into
-`.git/gh-stack` no matter what `gh repo set-default` says — so its PR lookups
-fail (`Could not resolve to a PullRequest with the number of 1`) and
-`gh stack submit` tries to create PRs on upstream. That directly conflicts with
-the rule above. The base-branch chaining above is the whole of what stacked PRs
-need; GitHub's native Stack grouping is not worth the upstream risk.
+**Do not use the `gh stack` CLI.** It resolves the repository to the *parent* of
+the fork — `gh stack init` writes `github.com:scallyw4g/bonsai` into
+`.git/gh-stack` regardless of `gh repo set-default` — so its PR lookups fail
+(`Could not resolve to a PullRequest with the number of 1`) and `gh stack submit`
+attempts to create PRs on upstream. That directly conflicts with the rule above.
+
+Grouping the PRs into a native Stack **from the GitHub web UI does work** — that
+is how the `port/macos` stack is linked. It is a manual step; do it after the PRs
+exist. Confirm with:
+
+```bash
+gh api graphql -f query='{ repository(owner:"nsillik", name:"bonsai") {
+  pullRequest(number:2) { stackEntry { position stack { number } } } } }'
+```
 
 ## Build
 
