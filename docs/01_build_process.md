@@ -3,13 +3,33 @@
 Building Bonsai is pretty straight-forward.  The main entry point for the build
 is a shell script, `make.sh`.
 
-NOTE: The officially supported compiler is clang-15.  Different versions may
-work, but may also emit warnings, or errors.  If the following instructions do
-not work for you, by all means open an issue and I will do what I can to assist.
+NOTE: The officially supported compiler is clang-18.1 or newer.  Different
+versions may work, but may also emit warnings, or errors.  If the following
+instructions do not work for you, by all means open an issue and I will do what
+I can to assist.
+
+## Supported platforms
+
+Linux, Windows (MinGW) and macOS.  See [Platform notes](#platform-notes) below
+for what each one requires.
 
 ## Dependencies
 
 Follow the instructions for fetching dependencies for bonsai_stdlib [https://github.com/scallyw4g/bonsai_stdlib/blob/master/docs/dependencies.md](https://github.com/scallyw4g/bonsai_stdlib/blob/master/docs/dependencies.md)
+
+Toolchain and system packages are declared in `.mise.toml` at the repo root:
+
+```
+mise bootstrap packages apply && mise install
+```
+
+`mise bootstrap packages apply` installs the Linux system packages (libx11-dev,
+freeglut3-dev) and `mise install` installs the pinned clang.  Both entries are
+filtered to Linux with `os = ["linux"]`, so running this on macOS is a no-op
+rather than an error.
+
+`mise run build` and `mise run test` wrap `./make.sh` and
+`./make.sh RunTests`.
 
 ## Quickstart
 
@@ -17,6 +37,38 @@ Follow the instructions for fetching dependencies for bonsai_stdlib [https://git
 git clone --recursive https://github.com/scallyw4g/bonsai bonsai && cd bonsai
 ./make.sh
 ```
+
+## Platform notes
+
+### macOS
+
+The one true prerequisite is the Xcode Command Line Tools, which mise cannot
+install:
+
+```
+xcode-select --install
+```
+
+`./make.sh` then builds with the system Apple clang.  Do **not** install clang
+through mise on macOS -- it would shadow Apple clang, and the mise clang pin is
+for Linux.
+
+macOS builds are cross-compiled to **x86_64** and run under Rosetta 2, because
+the SIMD layer is SSE/AVX-only.  `-mssse3 -mavx -mavx2 -mfma` are hard errors
+for an `arm64-apple-darwin` target, so on Apple Silicon the build passes
+`-target x86_64-apple-macos11` and the output runs under Rosetta.  Rosetta is
+preinstalled on most Macs; if not:
+
+```
+softwareupdate --install-rosetta --agree-to-license
+```
+
+Native arm64 is tracked separately and will drop the `-target` flag along with
+those four options.
+
+Because the whole tree is compiled as a single translation unit per target and
+the macOS backend uses AppKit directly, macOS targets are built as
+Objective-C++ (`-x objective-c++`).  There is no `.mm` shim.
 
 ## Build Options
 

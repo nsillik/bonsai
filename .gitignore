@@ -24,3 +24,7 @@ build/*
 breakpoints
 
 .vscode/*
+
+# Artifacts emitted by running ./make.sh and the test suites
+log.txt
+*.dSYM/
