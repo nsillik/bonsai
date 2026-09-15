@@ -202,7 +202,7 @@ master
 | `bonsai_stdlib` | `port/macos` | `6b80224` | [#1](https://github.com/nsillik/bonsai_stdlib/pull/1) |
 | `bonsai_stdlib` | `port/macos-phase1` | `82974dc` | [#2](https://github.com/nsillik/bonsai_stdlib/pull/2) |
 | `bonsai_stdlib` | `port/macos-phase2` | `a7d2dd3` | [#3](https://github.com/nsillik/bonsai_stdlib/pull/3) |
-| `bonsai` | `port/macos-phase3` | `c2b32422` | **pushed, no PR yet** |
+| `bonsai` | `port/macos-phase3` | `582814b7` | **pushed, no PR yet** |
 | `bonsai_stdlib` | `port/macos-phase3` | `930f51e` | **pushed, no PR yet** |
 | `bonsai_debug` | `port/macos-phase2` | `b6ceecb` | **none — deliberate** |
 
@@ -1562,7 +1562,7 @@ under Vulkan, where `gl_DrawIndex` is 1:1.
 
 ### Phase 3 progress: third 2026-09-15 session
 
-`bonsai` `PENDING_SHA`; `bonsai_stdlib` unchanged at `930f51e` (the fix is engine-side only).
+`bonsai` `582814b7`; `bonsai_stdlib` unchanged at `930f51e` (the fix is engine-side only).
 **Pushed; no PRs.**
 
 This session found and fixed the near-empty `terrain_gen` world, which was the open half of the gate.
