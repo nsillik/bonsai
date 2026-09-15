@@ -1728,17 +1728,10 @@ SubmitDrawList(u32 DrawCount, draw_arrays_command *Draws, render_matrix_pair *Ma
   {
     TIMED_NAMED_BLOCK(SubmitDrawList);
 
-    // One draw and one glUniform1i per entry, in place of one glMultiDrawArraysIndirect for
-    // the whole list.  Two reasons, both measured:
-    //
-    //  - glMultiDrawArraysIndirect is GL 4.3 and absent on macOS, and the shader reads its
-    //    transform from the DrawIndex uniform rather than gl_DrawID (GLSL 4.60), so something
-    //    has to supply the index per draw.  That makes this loop required on every platform,
-    //    not a macOS-only fallback; Phase 6 restores one call with gl_DrawIndex under Vulkan.
-    //  - The commands cannot be issued indirectly anyway: glDrawArraysIndirect crashes Apple's
-    //    driver intermittently -- SIGSEGV in GLRResourceList::addResource, from
-    //    gldRenderVertexArray, reached only through glDrawArraysIndirect_GL3Exec -- while the
-    //    identical draw issued as glDrawArrays never did.
+    // One draw and one glUniform1i per entry, in place of one glMultiDrawArraysIndirect for the
+    // whole list: that call is GL 4.3, and the transform comes from the DrawIndex uniform rather
+    // than gl_DrawID (GLSL 4.60), so the index has to be supplied per draw either way.  See
+    // docs/macos_port.md for why issuing them indirectly also crashes Apple's driver.
     GLuint Program = 0;
     GL->GetIntegerv(GL_CURRENT_PROGRAM, Cast(s32*, &Program));
     Assert(Program);
