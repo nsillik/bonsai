@@ -152,11 +152,11 @@ is not merely a portability fix: `DrawArraysIndirectCommand` became `draw_arrays
 * `scripts` in `.gitmodules` pointed at a `bonsai_build_scripts` repository that is not a
   submodule and whose path is a real tracked directory, which makes
   `git submodule update --init --recursive` fail.  The stanza is dropped.
-* The profiler's cycle-counter assertion needs `>` changed to `>=`, in
-  `nsillik/bonsai_debug`.  Under Rosetta `__rdtsc` is the system timer rather than a cycle
-  counter, so a short region reads the same value twice and the assert traps on healthy code --
-  on macOS, and on any native arm64 build, where `cntvct_el0` ticks at the same rate.  `>=`
-  still catches a counter that rewinds, which is what the assert was protecting against.
+* The profiler's cycle-counter assertion is `>=` rather than `>`, in `nsillik/bonsai_debug`.
+  Under Rosetta `__rdtsc` is the system timer rather than a cycle counter, so a short region
+  reads the same value twice and `>` traps on healthy code -- on macOS, and on any native arm64
+  build, where `cntvct_el0` ticks at the same rate.  `>=` still catches a counter that rewinds,
+  which is what the assert was protecting against.
 
 ## Verification
 
