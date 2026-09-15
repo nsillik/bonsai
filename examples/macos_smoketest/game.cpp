@@ -169,15 +169,17 @@ BONSAI_API_MAIN_THREAD_INIT_CALLBACK()
   world_position WorldCenter = World_Position(0, 0, 0);
   AllocateWorld(World, WorldCenter, SMOKETEST_WORLD_SIZE);
 
-  // NOTE(nsillik): SMOKETEST_ENGINE_NOISE=1 leaves the voxels to the engine's own GPU-noise path
-  // instead of writing them by hand.  That is the control for "is the renderer wrong, or is the
-  // world wrong": this example's own voxels render correctly, so if the engine's noise does not,
-  // the difference is in world generation rather than in the renderer.
-  if (getenv("SMOKETEST_ENGINE_NOISE") == 0)
-  {
-    chunk_completion_callback CompletionCallback = SmokeTestChunkCompletion;
-    Push(&Resources->ChunkCompletionCallbacks, &CompletionCallback);
-  }
+  // NOTE(nsillik): The voxels are always written by hand here -- that is what makes this
+  // example's frame a pure function of voxel position, which is the whole point of it.
+  //
+  // There used to be an env switch (SMOKETEST_ENGINE_NOISE=1) that left them to the engine's own
+  // GPU-noise path, as a control for "is the renderer wrong, or the world".  It could not
+  // discriminate: the engine's default shaping puts the surface at z ~ 1000 and the origin chunk
+  // comes out entirely solid, with this camera inside it, so it rendered nothing whether or not
+  // rendering worked (see the gotchas in docs/macos_port/deviations.md, #26 and #27).  Do not
+  // reintroduce it without moving the camera somewhere it can see the surface.
+  chunk_completion_callback CompletionCallback = SmokeTestChunkCompletion;
+  Push(&Resources->ChunkCompletionCallbacks, &CompletionCallback);
 
   // NOTE(nsillik): Pin the lighting.  Left on, the sun moves with accumulated wall-clock time and
   // two runs of the same binary produce different frames.

@@ -675,9 +675,6 @@ DrainLoRenderQueue(engine_resources *Engine)
 
                     auto GL = GetGL();
 
-                    s32 MaxFragShaderTexUnits = 0;
-                    GL->GetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS_ARB, &MaxFragShaderTexUnits);
-
                     BindUniformByName(Program, "OpCount", AtOpIndex);
 
                     // NOTE(nsillik)(macos): This was a glBindBufferBase(GL_SHADER_STORAGE_BUFFER)
@@ -879,6 +876,13 @@ CheckNoiseReadbackJobs(engine_resources *Engine, graphics *Graphics, platform *P
         GetGL()->BindBuffer(GL_PIXEL_PACK_BUFFER, PBOJob->PBOBuf.PBO);
         AssertNoGlErrors;
         u32 *NoiseValues = Cast(u32*, GetGL()->MapBuffer(GL_PIXEL_PACK_BUFFER, GL_READ_ONLY));
+        AssertNoGlErrors;
+
+        // NOTE(nsillik)(macos): Unbind immediately.  A pack buffer left bound turns the next
+        // client-pointer glReadPixels into a silent GL_INVALID_OPERATION that writes nothing,
+        // which reads as "the renderer drew nothing" rather than as an error.  Unbinding does
+        // not unmap: the mapping stays valid until UnmapBuffer.
+        GetGL()->BindBuffer(GL_PIXEL_PACK_BUFFER, 0);
         AssertNoGlErrors;
 
         auto BuildMeshJob = WorkQueueEntry(WorkQueueEntryFinalizeNoiseValues(PBOJob->PBOBuf, NoiseValues, PBOJob->NoiseDim, PBOJob->DestNode));
