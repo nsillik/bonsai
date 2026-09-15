@@ -3,7 +3,9 @@
 Status: **Phases 0, 1 and 2 landed; Phase 3 in progress** — PRs open on all three forks, CI for
 Phase 0/1 green on all three platforms. Phase 3 is now **smaller** than originally planned: Phase 2
 had to pull its minimum forward, the first Phase 3 session found and fixed a renderer crash, and the
-second found and fixed the rendering mismatch that was the gate (Deviations #24).
+second found and fixed the renderer half of the gate (Deviations #24), built the deterministic scene
+the comparison needs (#25), and showed that what is left is the voxel data source, not the renderer
+(#26).
 See [Next session](#next-session) to pick up, [Progress](#progress) for branches, SHAs and evidence,
 and [Deviations](#deviations-from-this-plan) for what implementation turned out to differ from this
 document.
@@ -21,22 +23,27 @@ already closed.
 
 What is left of Phase 3, in priority order:
 
-1. **The gate is met for the smoketest scene, by measurement.** `examples/macos_smoketest/`
-   (Deviations #25) renders identically on macOS and Linux — 12793 vs 12558 geometry pixels, mean
-   luma 106.9 vs 106.1, mean RGB (143,93,152) vs (141,92,150), 0.03% of pixels differing. It is also
-   reproducible on one platform (two runs differ only in the HUD's FPS/dT strip).
-2. **Re-run `terrain_gen` and `blank_project` under the fixed renderer.** They have not been looked
-   at since the `v3_u8` padding landed (Deviations #24), and both are named in the gate. Expect them
-   to be correct now; if `terrain_gen` still looks torn, the comparison must be done at a pinned
-   *state* (queues drained, `tDay` fixed), not at a frame index — see Deviations #25.
-3. Item 6 — confirm the world-edit path edits terrain. Blocked on brush assets, but the root cause
-   is a **reader bug, not stale assets** (Deviations #18/#21): the version-shim structs are wrong,
-   so the files are repairable and regeneration is not actually possible the way #18 assumed.
-4. Item 9 — `SetVSync`, dead code with no live callers. Decision made, recorded as Deviations #19;
-   no code change needed.
-5. Optional, and now cheap: **spike 6.0b** (vertex stride padding). The padding is no longer optional
-   or speculative — #24 landed it as the fix for the rendering mismatch — so what remains is only
-   its measurement half: frame time and heap bytes per unit of world, on `terrain_gen` at 1920x1080.
+1. **The voxel data source on macOS** — the gate's remaining half, and the only thing between Phase 3
+   and done. The renderer is verified (#25: the smoketest scene is identical on both platforms), and
+   the defect is localised to the terrain-shaping → `R32UI` → PBO readback → finalize path (#26).
+   **Start with the third standalone probe** described at the end of #26, using the shape of the two
+   already in `examples/tools/macos_gl_probes/`: render a known pattern into an `R32UI` attachment the
+   way `render_init.cpp:769` does, read it back the way `render_loop.cpp:762` does, compare every
+   texel. If it comes back clean, then ask whether `terrain_gen` renders coherently on Linux — that
+   separates "Apple's readback diverges" from "world generation is broken on both platforms and macOS
+   merely makes it visible".
+2. **`terrain_gen` and `blank_project` under the fixed renderer.** Both run clean, but neither has been
+   looked at *with a frame* since #24 landed, and each needs the pinning of #25 before any comparison
+   means anything. The dump probe is deliberately not in the tree — re-add it, pinned, per the
+   verification method below.
+3. Item 6 — the world-edit path. Blocked on brush assets, but the root cause is a **reader bug, not
+   stale assets** (#18/#21): the version-shim structs are wrong, so the files are repairable, and
+   regeneration is not actually possible the way #18 assumed.
+4. Item 9 — `SetVSync`, dead code with no live callers. Decision made, recorded as #19.
+5. Optional, and now cheap: **spike 6.0b** has only its measurement half left (frame time and heap
+   bytes per unit of world, `terrain_gen` at 1920x1080). The padding itself is landed and load-bearing
+   (#24), so the "win or only a cost?" question is now about the 20% vertex memory, not about whether
+   to do it at all.
 
 Branches already exist locally, created per the original recipe. **Do not re-run it**, and do not
 expect a PR yet — none exists (see [Branches and PRs](#branches-and-prs)):
@@ -87,7 +94,14 @@ were:
     two runs of the same binary), and its day/night cycle advances with wall-clock `dt`. Use
     `examples/macos_smoketest/` for parity work, and remember that `tDay` must be *measured* for
     brightness, not guessed (Deviations #25).
-13. **`screencapture` of the whole desktop captures the user's private content.** The engine can
+13. **A frame dump needs a *state* pin, not a frame index, and the probe is not in the tree.**
+    `terrain_gen` looks different on every run at frame 400; dump only when both work queues have been
+    drained for ~60 frames and `tDay` is fixed. Re-add the dump block per the verification method
+    below rather than assuming it is still there (Deviations #25).
+14. **`docker run` in a tool call dies with the call, and the Linux run script's `cp` never fires.**
+    Start the container detached, and `docker cp` the frame out while it is still running — the engine
+    does not exit on its own. Cache the apt layer in an image; a repeat Linux run is then build-only.
+15. **`screencapture` of the whole desktop captures the user's private content.** The engine can
     dump its own back buffer instead: `glReadPixels` + `WriteBitmapToDisk` (`bitmap.cpp:203`), read
     back on the render thread just before `BonsaiSwapBuffers`. It needs `glBindFramebuffer(0)` and
     an explicit `glBindBuffer(GL_PIXEL_PACK_BUFFER, 0)` first — see Deviations #22 for both traps.
@@ -167,8 +181,8 @@ master
 | `bonsai_stdlib` | `port/macos` | `6b80224` | [#1](https://github.com/nsillik/bonsai_stdlib/pull/1) |
 | `bonsai_stdlib` | `port/macos-phase1` | `82974dc` | [#2](https://github.com/nsillik/bonsai_stdlib/pull/2) |
 | `bonsai_stdlib` | `port/macos-phase2` | `a7d2dd3` | [#3](https://github.com/nsillik/bonsai_stdlib/pull/3) |
-| `bonsai` | `port/macos-phase3` | `bcae541c` | **none — not pushed yet** |
-| `bonsai_stdlib` | `port/macos-phase3` | `1d3144d` | **none — not pushed yet** |
+| `bonsai` | `port/macos-phase3` | `c4832943` | **none — not pushed yet** |
+| `bonsai_stdlib` | `port/macos-phase3` | `930f51e` | **none — not pushed yet** |
 | `bonsai_debug` | `port/macos-phase2` | `b6ceecb` | **none — deliberate** |
 
 **`bonsai_debug` is a third fork, and is deliberately not a PR.** Phase 2 needed one change there
@@ -761,9 +775,10 @@ wrong**, and the two isolating experiments it proposed never had to be run: `Loa
 `first = 0` both draw a *different chunk's mesh*, so those images were never comparable to the real
 ones, which is why "forced 0 looks coherent" appeared to mean something it did not.
 
-Established with two standalone offscreen GL 4.1 programs (`/tmp/inprobe/gl_first_probe.cpp`,
-`gl_uniform_probe.cpp`; no window, no pixels — the vertex buffer holds a known pattern, and the
-vertices the driver actually fetched are read back through transform feedback):
+Established with two standalone offscreen GL 4.1 programs, kept in
+`examples/tools/macos_gl_probes/` with a README saying how to build and run them (no window, no
+pixels, nothing in `make.sh` — the vertex buffer holds a known pattern, and the vertices the driver
+actually fetched are read back through transform feedback):
 
 | idiom | result |
 |---|---|
@@ -789,7 +804,7 @@ Two engine-side checks, both of which passed *after* the fix and neither of whic
 the transform TBO is byte-identical to the CPU copy (0 of 1728 matrices differ), and the VAO reports
 `size=3 type=GL_BYTE stride=4` for position and normal.
 
-### 25. An empty `case` body is not the only way to lose the log, and `terrain_gen` cannot be compared
+### 25. `terrain_gen` cannot be compared across runs; `macos_smoketest` exists for that
 
 Two things that cost time in this session and will cost it again:
 
@@ -821,6 +836,56 @@ window backing on macOS and the window/back-buffer size on Linux, so the raw gri
 | pixels differing by more than 32 luma | 89 (0.03%) | |
 
 The scene — a ground slab, a three-step staircase, a column and a ridge — renders the same on both.
+
+### 26. The renderer is verified; what is still wrong is the **voxel data source**
+
+The gate's remaining half, and it is not the draw path. Two runs of the *same* example, same camera,
+same renderer, differing only in where the voxels come from:
+
+| voxel source | result |
+|---|---|
+| hand-written in `examples/macos_smoketest/` | the full scene — ground slab, three-step staircase, column, ridge; measured identical to Linux (#25) |
+| the engine's own GPU noise (`SMOKETEST_ENGINE_NOISE=1`) | **almost nothing** — a handful of sliver-like fragments in an empty world |
+
+So `terrain_gen`'s landscape of long horizontal shelves with sky between them is a *data* defect, not
+a rendering one: the geometry is drawn correctly from voxels that are not what the shading shaders
+wrote. It also explains the wrong colours in that screenshot — the material bits are wrong too.
+
+The path, in order, none of it verified today:
+
+| stage | where |
+|---|---|
+| terrain-shaping shaders render into a ping-pong `RenderToTexture` pair (`RGB32F`) | `render_loop.cpp:655-715` |
+| "Terrain Finalize" pass renders into `TerrainFinalizeRC.FBO`, a 2D `GL_R32UI` texture of `TextureDim = 64 x (66*66)` — the chunk volume packed into rows | `render_loop.cpp:723-739`, `render_init.cpp:683,769-770` |
+| `ReadPixels(0, 0, TextureDim, GL_RED_INTEGER, GL_UNSIGNED_INT, 0)` into a `GL_PIXEL_PACK_BUFFER`, then a fence, pushed as a `finalize_noise_values` job | `render_loop.cpp:748-768` |
+| `CheckNoiseReadbackJobs` maps the PBO | `render_loop.cpp:859-890` |
+| voxels finalized from it — **bit 31 = filled**, low bits = material | `FinalizeOccupancyMasksFromNoiseValues`, `world_chunk.cpp:4458` |
+
+Candidates, none confirmed:
+
+1. **The `R32UI` render target and integer readback on Apple's GL.** Everything measured in #24 was
+   vertex fetch, attributes, uniforms and texture-buffer fetches; integer-texture rendering and
+   `GL_RED_INTEGER`/`GL_UNSIGNED_INT` readback are untouched by it.
+2. **The shaping shaders themselves** — 410-core since Phase 2, and they are the only other place a
+   texture buffer plus many texture units are used (`Assert(TexUnit <= SHADER_TEXTURE_BUFFER_UNIT)`
+   at `render_loop.cpp:695` shows how close that gets to a collision).
+3. **Row packing** — probably innocent: rows are 64 texels of 4 bytes = 256 B, already aligned for
+   the default `GL_PACK_ALIGNMENT` of 4.
+4. **The pack-buffer state leak in #22** (`CheckNoiseReadbackJobs` maps the pack buffer and never
+   unbinds it). The readback binds its own PBO first (`render_loop.cpp:761`), so this is probably not
+   it — but `glReadPixels(..., 0)` *is* "offset into the bound pack buffer" semantics, so it is worth
+   ruling out explicitly rather than by argument.
+
+**Portability note from the same measurements:** on this driver `glReadPixels` reads from
+`GL_READ_BUFFER`, which defaults to `COLOR_ATTACHMENT0`; reading any *other* attachment needs an
+explicit `glReadBuffer` (hit while reading the gBuffer's `gNormal` and `gPosition`). The noise
+readback relies on the default being attachment 0, which holds today.
+
+**Next step:** a third standalone probe, same shape as the two in #24 — render a known pattern into an
+`R32UI` attachment the way `render_init.cpp:769` does, read it back the way `render_loop.cpp:762`
+does, and compare every texel. That names the stage in one run. If it comes back clean, the next
+question is whether `terrain_gen` renders coherently on Linux: if it does, Apple's readback diverges;
+if it does not, world generation is broken on both platforms and macOS merely makes it visible.
 
 ---
 
@@ -1380,7 +1445,26 @@ is what feeds it. Note the loop is **not** a macOS-only fallback — it runs on 
 the shader no longer has `gl_DrawID` for a single call to read. Phase 6 gets the single call back
 under Vulkan, where `gl_DrawIndex` is 1:1.
 
-### Phase 3 progress: 2026-09-14 session
+### Phase 3 progress: second 2026-09-14 session
+
+`bonsai` `05eb39b5`, `c4832943`; `bonsai_stdlib` `930f51e`. **Neither pushed; no PRs.**
+
+This session found and fixed the rendering mismatch that was the gate (#24), built the deterministic
+scene the comparison needs (#25), and established that what is *left* of the mismatch is the voxel
+data source rather than the renderer (#26).
+
+| Check | Result |
+|---|---|
+| `./make.sh` | exit 0, 0 errors |
+| `./make.sh RunTests` | exit 0, 20 suites |
+| `terrain_gen`, `blank_project`, `macos_smoketest` | each runs to a clean SIGTERM, no trap, no GL errors |
+| two macOS smoketest runs | pixel-identical apart from a 15-row strip at the top (the HUD's FPS/dT text) |
+| macOS vs Linux, smoketest | geometry 12793 vs 12558 px, mean luma 106.9 vs 106.1, mean RGB (143,93,152) vs (141,92,150), 0.03% of pixels differing by >32 luma |
+
+Adding `examples/macos_smoketest/` to `make.sh`'s `BUNDLED_EXAMPLES` is what makes it build with the
+rest; it has no `assets/` directory and needs none.
+
+### Phase 3 progress: first 2026-09-14 session
 
 Branches `port/macos-phase3` created off `port/macos-phase2` in both repos and committed:
 `bonsai` `bcae541c`, `bonsai_stdlib` `1d3144d`. **Neither pushed; no PRs.** Nothing else is pending
@@ -1402,6 +1486,18 @@ The crash that was fixed is Deviations #21. What remains is the gate, and the ga
 here — it was invisible until this session, because `terrain_gen` crashed before it could render.
 
 ### Verification method (what the new session needs to reproduce)
+
+**The dump probe is not in the tree** — it was removed before committing, so it has to be re-added
+for any frame comparison. It also has to be *pinned*: dumping at a frame index alone is not a pin
+(#25). What worked:
+
+- dump only when `Plat->HighPriority` and `Plat->LowPriority` have had `EnqueueIndex == DequeueIndex`
+  for ~60 consecutive frames, so the async mesh work is done;
+- pin `Graphics->Settings.Lighting.tDay`, because the day/night cycle advances with wall-clock `dt`
+  and changes the lighting between runs;
+- normalise `ScreenDim` before comparing platforms (macOS reports the display-clamped window backing,
+  Linux the window/back-buffer size);
+- ignore the top ~15 rows, which are the `EngineDebug` HUD's live numbers.
 
 The engine can dump its own composed back buffer. Add a temporary block on the render thread in
 `RenderThread_Main`, immediately before `BonsaiSwapBuffers` (`render_loop.cpp:990`):
@@ -1452,6 +1548,19 @@ docker run --rm --platform linux/amd64 -v /tmp/linuxsrc:/src -v /tmp/linuxbuild:
 #     Xvfb :99 -screen 0 1920x1080x24 &   DISPLAY=:99 ./bin/game_loader …
 ```
 
+Practicalities that cost time in the second session, none of them obvious:
+
+- **The run script's `cp` never executes.** The engine does not exit on its own, so anything after the
+  `game_loader` invocation waits for the script's `timeout` to fire. `docker cp bonsai-linux:/tmp/INPROBE_frame.bmp /tmp/linuxout/`
+  while it is still running is the way to get the frame.
+- **Cache the apt layer.** A `Dockerfile` from `ubuntu:24.04` that installs the packages once, tagged
+  and reused, turns a repeat Linux run from ~10 minutes into a build-only one. The tree is bind
+  mounted, so the built `bin/` survives between containers and the build can be skipped entirely.
+- **Start the container detached** (`docker run -d --name …`). A foreground `docker run` from a tool
+  call dies with the call.
+- **It is slow.** Software rendering under emulated `linux/amd64`: ~180 frames took about four minutes
+  in the second session's run, versus a second on the host.
+
 Without `MESA_GL_VERSION_OVERRIDE=4.6` **and** `MESA_GLSL_VERSION_OVERRIDE=460`, llvmpipe reports
 GL 4.5, `#version 460` fails to compile, and `DepthRTT.vertexshader|DepthRTT.fragmentshader` dies
 at `Linking shader pair` → `Assert` in `InitializeShadowRenderGroup` (`shadow_map.cpp:30`) → SIGTRAP
@@ -1463,17 +1572,21 @@ real hardware, and this recipe is the closest proxy available on this machine.
 
 | # | Change | Note |
 |---|---|---|
-| — | Root-cause the macOS↔Linux rendering mismatch | **The gate.** Two candidates narrowed, neither confirmed; run the one-line experiment in Deviations #20 first |
-| 9 | `SetVSync` | Decision made, no code change (Deviations #19). Phase 6 replaces it; the trap to avoid if it is ever wired up is in that deviation |
-| — | Engine log output lost on a trap, and `GL_PIXEL_PACK_BUFFER` left bound | Both hit while building the frame-dump probe. Deviations #22 |
+| — | **Voxel data source on macOS** | The open half of the gate, now localised to the terrain-shaping → `R32UI` → PBO readback → finalize path (#26). Renderer is verified. Next step is the third standalone probe, then the same question on Linux |
+| — | `terrain_gen` and `blank_project` visuals | Run clean, but have not been looked at *with a frame* since #24 landed, and cannot be compared at all until the data path above is fixed (#25) |
+| 6 | World-edit path | Blocked on brush assets; root cause is the version-shim reader, not staleness (#18/#21) |
+| 9 | `SetVSync` | Decision made, no code change (#19). Phase 6 replaces it |
+| — | Engine log output lost on a trap, and `GL_PIXEL_PACK_BUFFER` left bound | Both hit while building the frame-dump probe (#22) |
+| — | Spike 6.0b | Only its measurement half is left — the padding itself is landed and load-bearing (#24). Frame time and heap bytes per unit of world, `terrain_gen` at 1920x1080 |
 
 ### Gate
 
-`terrain_gen` and `blank_project` render, visually matching Linux. Confirmed so far: `terrain_gen`
-renders on macOS without crashing and draws correct UI text, but its terrain does not match Linux
-— that is the open item. `blank_project` has never been launched at all. Shader hot-reload still
-works (Phase 2 verified it for the game lib; the terrain-shader picker window is live in
-`terrain_gen` and reloads on click).
+`terrain_gen` and `blank_project` render, visually matching Linux. **The renderer half is met and
+measured** (#25: the smoketest scene is identical across platforms). **The `terrain_gen` half is not**,
+and it now has a cause rather than a symptom: with the engine's own noise the world comes out wrong,
+with hand-written voxels it does not (#26). `blank_project` has not been launched since #24 landed.
+Shader hot-reload still works (Phase 2 verified it for the game lib; the terrain-shader picker window
+is live in `terrain_gen` and reloads on click).
 
 Optional, and the cheapest moment to do it: **spike 6.0b** (vertex-format stride padding). It needs
 nothing from Phase 6 and both strides are legal in GL, so this is the earliest point at which the
