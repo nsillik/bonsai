@@ -2,7 +2,8 @@
 
 Status: **Phases 0, 1 and 2 landed; Phase 3 in progress** — PRs open on all three forks, CI for
 Phase 0/1 green on all three platforms. Phase 3 is now **smaller** than originally planned: Phase 2
-had to pull its minimum forward, and the first Phase 3 session found and fixed a renderer crash.
+had to pull its minimum forward, the first Phase 3 session found and fixed a renderer crash, and the
+second found and fixed the rendering mismatch that was the gate (Deviations #24).
 See [Next session](#next-session) to pick up, [Progress](#progress) for branches, SHAs and evidence,
 and [Deviations](#deviations-from-this-plan) for what implementation turned out to differ from this
 document.
@@ -20,17 +21,22 @@ already closed.
 
 What is left of Phase 3, in priority order:
 
-1. **Root-cause and fix the macOS↔Linux rendering mismatch** (Deviations #20). This is the only
-   thing standing between Phase 3 and its gate. Two candidate causes were narrowed; neither is
-   confirmed. Start with the one-line `DrawIndex`-only experiment described in Deviations #20.
-2. Item 6 — confirm the world-edit path edits terrain. Blocked on brush assets, but the root cause
-   is now known and it is a **reader bug, not stale assets** (Deviations #21): the version-shim
-   structs are wrong, so the files are repairable and regeneration is not actually possible the way
-   Deviations #18 assumed.
-3. Item 9 — `SetVSync`, dead code with no live callers and two commented call sites. Decision made,
-   recorded as Deviations #19; no code change needed.
-4. The gate itself: `blank_project` rendering on macOS (never launched), then the Linux parity
-   comparison (Deviations #20).
+1. **The gate is met for the smoketest scene, by measurement.** `examples/macos_smoketest/`
+   (Deviations #25) renders identically on macOS and Linux — 12793 vs 12558 geometry pixels, mean
+   luma 106.9 vs 106.1, mean RGB (143,93,152) vs (141,92,150), 0.03% of pixels differing. It is also
+   reproducible on one platform (two runs differ only in the HUD's FPS/dT strip).
+2. **Re-run `terrain_gen` and `blank_project` under the fixed renderer.** They have not been looked
+   at since the `v3_u8` padding landed (Deviations #24), and both are named in the gate. Expect them
+   to be correct now; if `terrain_gen` still looks torn, the comparison must be done at a pinned
+   *state* (queues drained, `tDay` fixed), not at a frame index — see Deviations #25.
+3. Item 6 — confirm the world-edit path edits terrain. Blocked on brush assets, but the root cause
+   is a **reader bug, not stale assets** (Deviations #18/#21): the version-shim structs are wrong,
+   so the files are repairable and regeneration is not actually possible the way #18 assumed.
+4. Item 9 — `SetVSync`, dead code with no live callers. Decision made, recorded as Deviations #19;
+   no code change needed.
+5. Optional, and now cheap: **spike 6.0b** (vertex stride padding). The padding is no longer optional
+   or speculative — #24 landed it as the fix for the rendering mismatch — so what remains is only
+   its measurement half: frame time and heap bytes per unit of world, on `terrain_gen` at 1920x1080.
 
 Branches already exist locally, created per the original recipe. **Do not re-run it**, and do not
 expect a PR yet — none exists (see [Branches and PRs](#branches-and-prs)):
@@ -76,7 +82,12 @@ were:
     `FILE*`, and `log.txt` likewise, so a SIGTRAP/SIGSEGV loses the tail. Any per-frame probe must
     write to stderr and `fflush` — an `Info()` tail that looks like it says where the crash was is
     just wherever the buffer happened to flush. This wasted a round of crash localisation.
-12. **`screencapture` of the whole desktop captures the user's private content.** The engine can
+12. **Do not compare frames across runs of `terrain_gen`** — chunk meshing is async, so frame 400 is
+    a different scene on a fast machine than on a slow one (measured: 45% of the bytes differ between
+    two runs of the same binary), and its day/night cycle advances with wall-clock `dt`. Use
+    `examples/macos_smoketest/` for parity work, and remember that `tDay` must be *measured* for
+    brightness, not guessed (Deviations #25).
+13. **`screencapture` of the whole desktop captures the user's private content.** The engine can
     dump its own back buffer instead: `glReadPixels` + `WriteBitmapToDisk` (`bitmap.cpp:203`), read
     back on the render thread just before `BonsaiSwapBuffers`. It needs `glBindFramebuffer(0)` and
     an explicit `glBindBuffer(GL_PIXEL_PACK_BUFFER, 0)` first — see Deviations #22 for both traps.
@@ -734,6 +745,82 @@ docker run --rm --platform linux/amd64 -v /tmp/linuxsrc:/src …
 ```
 
 That keeps `$PWD/bin` untouched and gives the Linux build its own `bin/` as well.
+
+### 23a. The frame dump must **not** reverse its rows (correction to #22)
+
+#22's last paragraph says a correct-looking dump is upside down unless the rows are reversed first.
+**It is the other way round.** `WriteBitmapToDisk` emits rows in file order, and BMP stores rows
+bottom-up, which is exactly the order `glReadPixels` returns; writing them as given is correct.
+Reversing them produces the upside-down file, which is why the first Phase 3 session's frames looked
+mirrored and were read as such. Measured, both ways, against a frame whose orientation is known.
+
+### 24. The macOS↔Linux mismatch is Apple fetching 3-byte vertices at a 4-byte stride — FIXED
+
+This is Deviations #20's open gate, resolved. **#20's candidate 1 (large `first` offsets) was
+wrong**, and the two isolating experiments it proposed never had to be run: `LoadTransform(0)` and
+`first = 0` both draw a *different chunk's mesh*, so those images were never comparable to the real
+ones, which is why "forced 0 looks coherent" appeared to mean something it did not.
+
+Established with two standalone offscreen GL 4.1 programs (`/tmp/inprobe/gl_first_probe.cpp`,
+`gl_uniform_probe.cpp`; no window, no pixels — the vertex buffer holds a known pattern, and the
+vertices the driver actually fetched are read back through transform feedback):
+
+| idiom | result |
+|---|---|
+| `GL_BYTE` x3, stride 4, 4-byte-padded data | **0 of 57 (first x count) combinations wrong** |
+| `GL_BYTE` x3, stride 0 — tightly packed 3 bytes | **57 of 57 wrong**, from the second vertex on |
+| float x3 stride 12 | 0 of 57 |
+| engine layout + `matl` via `VertexAttribIPointer` + separate normal buffer | 0 of 57 |
+| large `first` (0 … 67,108,863) | innocent |
+| per-draw `glUniform1i(DrawIndex)` + `texelFetch(samplerBuffer)` over 1700 draws x 60 frames | innocent, 0 mismatches in 226,936 checks |
+
+With `stride = 0` the driver reads at a 4-byte stride, so every vertex after the first is assembled
+from the wrong bytes — `got (0,68,62)` where the data says `(68,56,62)`, a one-byte shift. That is
+what turned every chunk mesh into the slivers of #20's table, and why the packed layout renders
+correctly on Mesa and incorrectly on Apple.
+
+**Fix** (in `bonsai_stdlib`, three files): `v3_u8` is `alignas(4)` so `sizeof(v3_u8) == 4`, the
+element-size table is declared as `sizeof(v3_u8)`, and the two attribute pointers use
+`sizeof(v3_u8)` as their stride instead of `0`. Every other `sizeof(v3_u8)` in the tree then means
+"4 bytes on the GPU" and needed no edit. Cost is the +20% vertex memory spike 6.0b predicted; the
+fourth byte is padding that nothing reads and the meshers do not write.
+
+Two engine-side checks, both of which passed *after* the fix and neither of which was the cause:
+the transform TBO is byte-identical to the CPU copy (0 of 1728 matrices differ), and the VAO reports
+`size=3 type=GL_BYTE stride=4` for position and normal.
+
+### 25. An empty `case` body is not the only way to lose the log, and `terrain_gen` cannot be compared
+
+Two things that cost time in this session and will cost it again:
+
+1. **`terrain_gen` is unusable for a frame comparison.** Its chunks stream in on worker threads, so
+   how much of the world exists at a given `FrameIndex` depends on how fast the machine is: two runs
+   of the *same* binary at frame 400 differed in **45% of the frame's bytes**. Its day/night cycle
+   also advances with accumulated wall-clock `dt` (`api.cpp:515`), which changes the lighting between
+   runs even at a fixed frame. Dumping "at frame N" is not a pin.
+2. **`examples/macos_smoketest/` exists for this.** It defines the world by hand — a
+   `chunk_completion_callback` overwrites the engine's noise buffer before voxels are finalized
+   (`ChunkCompletionCallbacks`, invoked at `api.cpp:736-750`; bit 31 of each `u32` means "filled",
+   the low bits are the voxel's material) — so the scene is a pure function of voxel position. With
+   the camera aimed at the pattern, the day/night cycle off and `tDay` pinned, two macOS runs are
+   **pixel-identical except a 15-row strip at the top of the frame**, which is the `EngineDebug`
+   HUD's live FPS/dT numbers. `tDay` is not free to choose: `UpdateKeyLight` derives the sun's
+   direction and colour from it, and most values put the sun below the horizon. Sweeping it and
+   measuring the frame's mean luminance gives `0 -> 0.0, 1 -> 14.6, 3 -> 5.3, 5 -> 26.5, 6 -> 7.9`;
+   the example pins `5`.
+
+Gate result with that example, macOS (3440x1378) vs Linux (4096x2160, llvmpipe under Xvfb), both
+rescaled to a common grid after cropping to a common aspect (`ScreenDim` is the display-clamped
+window backing on macOS and the window/back-buffer size on Linux, so the raw grids differ):
+
+| metric | macOS | Linux |
+|---|---|---|
+| geometry pixels | 12793 (3.9%) | 12558 (3.8%) |
+| mean luma of geometry | 106.9 | 106.1 |
+| mean RGB of lit geometry | (143, 93, 152) | (141, 92, 150) |
+| pixels differing by more than 32 luma | 89 (0.03%) | |
+
+The scene — a ground slab, a three-step staircase, a column and a ridge — renders the same on both.
 
 ---
 

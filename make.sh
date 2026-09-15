@@ -48,6 +48,7 @@ BONSAI_INTERNAL='-D BONSAI_INTERNAL=1'
 EXAMPLES_TO_BUILD=""
 
 BUNDLED_EXAMPLES="
+  $EXAMPLES/macos_smoketest
   $EXAMPLES/blank_project
   $EXAMPLES/turn_based
   $EXAMPLES/the_wanderer
