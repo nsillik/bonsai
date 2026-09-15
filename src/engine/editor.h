@@ -2219,6 +2219,13 @@ struct world_edit_op
 };
 #pragma pack(pop)
 
+// NOTE(nsillik)(macos): world_edit.fragmentshader reads this struct through a texture buffer as
+// 17 GL_RGBA32F texels (see LoadOp there), so its size and every field offset are load-bearing
+// in a file the compiler cannot cross-check.  The Pad members are what keep the offsets regular.
+// See docs/macos_port.md.
+CAssert(sizeof(world_edit_op) == 272);
+CAssert(offsetof(world_edit_op, Pad9) == 268);
+
 struct level_editor
 poof(@do_editor_ui)
 {

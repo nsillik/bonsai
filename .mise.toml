@@ -1,0 +1,21 @@
+# Build tooling for the platforms mise can bootstrap.  Windows is absent: it keeps MinGW and is the
+# least-exercised path.
+#
+# macOS declares no packages here -- its toolchain is the Xcode Command Line Tools, which mise cannot
+# install -- and the clang pin below is Linux-only, since installing it on macOS would shadow Apple
+# clang.  The version floor is real: the distro clang-14 cannot compile the tree.
+#
+#   mise bootstrap packages apply && mise install
+
+[tools]
+clang = { version = "18.1.8", os = ["linux"] }
+
+[bootstrap.packages]
+"apt:libx11-dev"    = { os = "linux" }
+"apt:freeglut3-dev" = { os = "linux" }
+
+[tasks.build]
+run = "./make.sh"
+
+[tasks.test]
+run = "./make.sh RunTests"

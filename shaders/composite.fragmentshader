@@ -109,7 +109,10 @@ vec3 agxLook(vec3 val) {
 #if 1
   switch (ToneMappingType)
   {
-    case 3: {} break;
+    // NOTE(nsillik)(macos): ToneMappingType 3 means "use the defaults", which offset/slope/
+    // power/sat already are above, so there is deliberately no case for it.  Never write a case
+    // body as `{}` -- Apple's GLSL linker segfaults on an empty compound statement.  See
+    // docs/macos_port.md.
 
     case 4:
     {

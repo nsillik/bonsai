@@ -25,10 +25,33 @@ struct transform_data
   mat4 NormalMatrix;
 };
 
-layout(std430, binding = 0) readonly buffer TransformBuffer
+// NOTE(nsillik)(macos): A texture buffer rather than the std430 block this was, which needs
+// GLSL 4.30.  Texel N is bytes [16N, 16N+16), so LoadTransform reassembles the struct from
+// consecutive texels and the C++ render_matrix_pair is unchanged (128 bytes = 8 texels).
+// See docs/macos_port.md.
+uniform samplerBuffer TransformBuffer;
+
+// NOTE(nsillik)(macos): Stands in for gl_DrawID (GLSL 4.60).  SubmitDrawList uploads it per draw.
+uniform int DrawIndex;
+
+#define TRANSFORM_TEXEL_COUNT 8
+
+transform_data
+LoadTransform(int Index)
 {
-  transform_data Transforms[];
-};
+  int Base = Index * TRANSFORM_TEXEL_COUNT;
+
+  transform_data Result;
+  Result.ModelMatrix  = mat4(texelFetch(TransformBuffer, Base + 0),
+                             texelFetch(TransformBuffer, Base + 1),
+                             texelFetch(TransformBuffer, Base + 2),
+                             texelFetch(TransformBuffer, Base + 3));
+  Result.NormalMatrix = mat4(texelFetch(TransformBuffer, Base + 4),
+                             texelFetch(TransformBuffer, Base + 5),
+                             texelFetch(TransformBuffer, Base + 6),
+                             texelFetch(TransformBuffer, Base + 7));
+  return Result;
+}
 
 // TODO(Jesse): Pass in a m3 here.  I didn't have an m3 struct, so I didn't
 // bother, but I should do that at some point..
@@ -50,7 +73,7 @@ void main()
   /* TransEmiss = V2(0.5f, 0.5f); */
 
 #if 1
-  transform_data Transform = Transforms[gl_DrawID];
+  transform_data Transform = LoadTransform(DrawIndex);
   mat4 ModelMatrix = Transform.ModelMatrix;
   mat4 NormalMatrix = Transform.NormalMatrix;
 #else

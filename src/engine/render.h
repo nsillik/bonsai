@@ -12,12 +12,17 @@ struct world_chunk;
 
 #define DEFAULT_LINE_THICKNESS (0.3f)
 
-struct DrawArraysIndirectCommand
+// NOTE(nsillik): One entry of a draw list: the range of the GPU mesh heap to draw.  The
+// transform comes from the DrawIndex uniform and the MatrixData uploaded alongside, not from
+// the command.
+//
+// This was DrawArraysIndirectCommand, issued with glMultiDrawArraysIndirect -- GL 4.3, and
+// absent from the 4.1 core context macOS caps at.  InstanceCount and BaseInstance were written
+// every frame and never read.  See docs/macos_port.md.
+struct draw_arrays_command
 {
-  u32 Count;
-  u32 InstanceCount;
   u32 First;
-  u32 BaseInstance;
+  u32 Count;
 };
 
 #define SSAO_KERNEL_SIZE 32
@@ -291,4 +296,4 @@ link_internal m4
 GetTransformMatrix(entity *Entity);
 
 link_internal void
-MultiDrawIndirect(u32 DrawCommandsAt, DrawArraysIndirectCommand *DrawCommands, render_matrix_pair *MatrixData);
+SubmitDrawList(u32 DrawCount, draw_arrays_command *Draws, render_matrix_pair *MatrixData);

@@ -125,12 +125,7 @@ RenderImmediateGeometryToGBuffer(v2i ApplicationResolution, triple_buffered_gpu_
   // TODO(Jesse): Hoist this check out of here
   GetGL()->Disable(GL_CULL_FACE);
 
-  DrawArraysIndirectCommand Cmd = {
-    ImmediateGeometry->Buffer.At,
-    1,
-    0,
-    0,
-  };
+  draw_arrays_command Cmd = { .First = 0, .Count = ImmediateGeometry->Buffer.At };
   render_matrix_pair MatrixData = {
     m4(
         V4(1,0,0,0),
@@ -153,7 +148,7 @@ RenderImmediateGeometryToGBuffer(v2i ApplicationResolution, triple_buffered_gpu_
   auto GL = GetGL();
 
   GL->BindVertexArray(Handles->VAO);
-  MultiDrawIndirect(1, &Cmd, &MatrixData);
+  SubmitDrawList(1, &Cmd, &MatrixData);
 
   GL->Enable(GL_CULL_FACE);
 
@@ -842,6 +837,13 @@ SetupRenderToTextureShader(engine_resources *Engine, texture *Texture, camera *C
       GetGL()->BindFramebuffer(GL_FRAMEBUFFER, RTTGroup->FBO.ID);
       GetGL()->BindTexture(GL_TEXTURE_2D, Texture->ID);
 
+      // NOTE(nsillik)(macos): The reset stays because Attachments is a running *counter*, not a
+      // description of what is attached: FramebufferTexture attaches to COLOR_ATTACHMENT0 +
+      // Attachments and then increments it.  This framebuffer is re-pointed at a new image on
+      // every call, so without the reset the second call would attach to slot 1 and
+      // SetDrawBuffers would turn both slots on -- one image on two draw buffers, which Apple's
+      // GL answers by discarding every fragment.  See the note in render_init.cpp's Terrain
+      // Decoration block.
       RTTGroup->FBO.Attachments = 0;
       FramebufferTexture(&RTTGroup->FBO, Texture);
       SetDrawBuffers(&RTTGroup->FBO);
@@ -954,16 +956,15 @@ SetupVertexAttribsFor_gpu_heap_allocation(gpu_heap_allocator *Heap, gpu_heap_all
 #endif
 
 
-link_internal void
-BufferIndirectDrawCommand(DrawArraysIndirectCommand *DrawCommands,
-                                                u32  DrawCommandsAt,
-                                gpu_heap_allocation *Allocation )
+link_internal draw_arrays_command
+DrawArraysCommand(gpu_heap_allocation *Allocation)
 {
-  DrawCommands[DrawCommandsAt] = {
-    Cast(u32, Allocation->SizeInElements),
-    1,
-    Cast(u32, Allocation->BaseOffsetInElements),
-    DrawCommandsAt };
+  draw_arrays_command Result = {
+    .First = Cast(u32, Allocation->BaseOffsetInElements),
+    .Count = Cast(u32, Allocation->SizeInElements),
+  };
+
+  return Result;
 }
 
 link_internal void
@@ -1321,8 +1322,7 @@ RenderToTexture(engine_resources *Engine, asset_thumbnail *Thumb, model *Model, 
 link_internal void
 DrawGpuHeapAllocationImmediate(engine_resources *Engine, gpu_heap_allocation *Mesh)
 {
-  DrawArraysIndirectCommand DrawCommand = {};
-  BufferIndirectDrawCommand(&DrawCommand, 0, Mesh);
+  draw_arrays_command DrawCommand = DrawArraysCommand(Mesh);
 
   /* m4 ModelMatrix = GetTransformMatrix(Basis*GLOBAL_RENDER_SCALE_FACTOR, V3(Chunk->DimInChunks)*GLOBAL_RENDER_SCALE_FACTOR, Quaternion()); */
   /* m4 NormalMatrix = Transpose(Inverse(ModelMatrix)); */
@@ -1707,46 +1707,53 @@ CheckOcclusionQuery(world_chunk *Chunk)
 }
 
 link_internal void
-MultiDrawIndirect(u32 DrawCommandsAt, DrawArraysIndirectCommand *DrawCommands, render_matrix_pair *MatrixData)
+SubmitDrawList(u32 DrawCount, draw_arrays_command *Draws, render_matrix_pair *MatrixData)
 {
-  Assert(DrawCommandsAt);
+  Assert(DrawCount);
 
   auto GL = GetGL();
-  local_persist u32 IndirectDrawBuffer = 0;
-  local_persist u32 MatrixStorageBuffer = 0;
+  local_persist texture_buffer_binding TransformBufferBinding = {};
 
-  u32 RequiredIndirectDrawBufferSize = Cast(GLsizeiptr, sizeof(DrawArraysIndirectCommand))*DrawCommandsAt;
-  u32 RequiredMatrixBufferSize = Cast(GLsizeiptr, sizeof(render_matrix_pair))*DrawCommandsAt;
+  u32 RequiredMatrixBufferSize = Cast(GLsizeiptr, sizeof(render_matrix_pair))*DrawCount;
 
-  if (IndirectDrawBuffer == 0)
+  // NOTE(nsillik)(macos): A texture buffer rather than the glBindBufferBase that fed the std430
+  // block in gBuffer.vertexshader, which needs GL 4.3.  See docs/macos_port.md.
+  //
+  // Both this and DrawIndex below resolve by *name* against whatever program is bound, so the
+  // caller must have the gBuffer shader bound -- the only one that declares either.  Every
+  // caller does, but not by construction: RenderDrawList ignores its Shader parameter and relies
+  // on the render command stream having emitted SetupShader first.
+  BindTextureBuffer(&TransformBufferBinding, "TransformBuffer", MatrixData, RequiredMatrixBufferSize);
+
   {
-    GL->GenBuffers(1, &IndirectDrawBuffer);
+    TIMED_NAMED_BLOCK(SubmitDrawList);
+
+    // One draw and one glUniform1i per entry, in place of one glMultiDrawArraysIndirect for the
+    // whole list: that call is GL 4.3, and the transform comes from the DrawIndex uniform rather
+    // than gl_DrawID (GLSL 4.60), so the index has to be supplied per draw either way.  See
+    // docs/macos_port.md for why issuing them indirectly also crashes Apple's driver.
+    GLuint Program = 0;
+    GL->GetIntegerv(GL_CURRENT_PROGRAM, Cast(s32*, &Program));
+    Assert(Program);
+
+    s32 DrawIndexUniform = GL->GetUniformLocation(Program, "DrawIndex");
+
+    // NOTE(nsillik): A miss would leave DrawIndex at 0 for every draw, so every chunk would be
+    // drawn with the first chunk's transform -- dense geometry in the wrong places, not an
+    // error.  Resolved once because the program cannot change mid-list.
+    Assert(DrawIndexUniform >= 0);
+
+    RangeIterator_t(u32, DrawIndex, DrawCount)
+    {
+      draw_arrays_command *Draw = Draws + DrawIndex;
+
+      GL->Uniform1i(DrawIndexUniform, s32(DrawIndex));
+      GL->DrawArrays(GL_TRIANGLES, Cast(s32, Draw->First), Cast(s32, Draw->Count));
+      AssertNoGlErrors;
+    }
   }
 
-  if (MatrixStorageBuffer == 0)
-  {
-    GL->GenBuffers(1, &MatrixStorageBuffer);
-  }
-
-  GL->BindBuffer(GL_DRAW_INDIRECT_BUFFER, IndirectDrawBuffer);
-  AssertNoGlErrors;
-
-  GL->BufferData(GL_DRAW_INDIRECT_BUFFER, RequiredIndirectDrawBufferSize, DrawCommands, GL_DYNAMIC_DRAW);
-  AssertNoGlErrors;
-
-  GL->BindBuffer(GL_SHADER_STORAGE_BUFFER, MatrixStorageBuffer);
-  AssertNoGlErrors;
-
-  GL->BufferData(GL_SHADER_STORAGE_BUFFER, RequiredMatrixBufferSize, MatrixData, GL_DYNAMIC_DRAW);
-  AssertNoGlErrors;
-
-  GL->BindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, MatrixStorageBuffer);
-  AssertNoGlErrors;
-
-  GL->MultiDrawArraysIndirect(GL_TRIANGLES, 0, s32(DrawCommandsAt), 0);
-  AssertNoGlErrors;
-
-  GL->BindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+  GL->BindBuffer(GL_TEXTURE_BUFFER, 0);
   AssertNoGlErrors;
 }
 
@@ -1754,6 +1761,11 @@ link_internal void
 RenderDrawList(engine_resources *Engine, octree_node_ptr_paged_list *DrawList, shader *Shader, camera *Camera)
 {
   auto GL = GetGL();
+
+  // NOTE(nsillik): `Shader` is unused: the draws below go through SubmitDrawList, which resolves
+  // its uniforms against whatever program is bound.  Keeping the parameter is what lets the
+  // render command carry the shader it means, and binding it here is the obvious fix if a second
+  // draw-list consumer ever appears.  See the note on the `if (Camera)` below.
 
   // TODO(Jesse): Turn this into an assert; there's no reason to have a draw command with an empty draw list!
   if (DrawList->ElementCount == 0) return;
@@ -1781,8 +1793,8 @@ RenderDrawList(engine_resources *Engine, octree_node_ptr_paged_list *DrawList, s
   }
 
 
-  u32 DrawCommandsAt = 0;
-  DrawArraysIndirectCommand *DrawCommands = Allocate(DrawArraysIndirectCommand, GetTranArena(), DrawList->ElementCount);
+  u32 DrawCount = 0;
+  draw_arrays_command *Draws = Allocate(draw_arrays_command, GetTranArena(), DrawList->ElementCount);
   render_matrix_pair *MatrixData = Allocate(render_matrix_pair, GetTranArena(), DrawList->ElementCount);
 
   {
@@ -1814,6 +1826,10 @@ RenderDrawList(engine_resources *Engine, octree_node_ptr_paged_list *DrawList, s
           Basis += GetSimSpaceP(World, Chunk->WorldP);
         }
 
+        // NOTE(nsillik): Every DrawCount++ is under this `if (Camera)`, so a draw list submitted
+        // without a camera accumulates nothing and SubmitDrawList is skipped below.  That is why
+        // the ShadowMap list -- pushed alongside this one, with Camera == 0 -- never issues a
+        // draw, and never reaches SubmitDrawList's asserts either.
         if (Camera)
         {
           if (Chunk->OcclusionQueryId == 0)
@@ -1833,8 +1849,8 @@ RenderDrawList(engine_resources *Engine, octree_node_ptr_paged_list *DrawList, s
             /* GL->EndQuery(GL_SAMPLES_PASSED); */
 
             /* DrawGpuHeapAllocationIndirect(Engine, Shader, &Engine->Graphics.GpuHeap, &Chunk->Mesh, Basis, Quaternion(), V3(Chunk->DimInChunks)); */
-            u32 DrawIndex = DrawCommandsAt++;
-            BufferIndirectDrawCommand(DrawCommands, DrawIndex, &Chunk->Mesh);
+            u32 DrawIndex = DrawCount++;
+            Draws[DrawIndex] = DrawArraysCommand(&Chunk->Mesh);
 
             m4 ModelMatrix = GetTransformMatrix(Basis*GLOBAL_RENDER_SCALE_FACTOR, V3(Chunk->DimInChunks)*GLOBAL_RENDER_SCALE_FACTOR, Quaternion());
             m4 NormalMatrix = Transpose(Inverse(ModelMatrix));
@@ -1845,8 +1861,8 @@ RenderDrawList(engine_resources *Engine, octree_node_ptr_paged_list *DrawList, s
           {
             /* DrawLod(Engine, Shader, &Chunk->Handles, Basis, Quaternion(), V3(Chunk->DimInChunks)); */
             /* DrawGpuHeapAllocationIndirect(Engine, Shader, &Engine->Graphics.GpuHeap, &Chunk->Mesh, Basis, Quaternion(), V3(Chunk->DimInChunks)); */
-            u32 DrawIndex = DrawCommandsAt++;
-            BufferIndirectDrawCommand(DrawCommands, DrawIndex, &Chunk->Mesh);
+            u32 DrawIndex = DrawCount++;
+            Draws[DrawIndex] = DrawArraysCommand(&Chunk->Mesh);
 
             m4 ModelMatrix = GetTransformMatrix(Basis*GLOBAL_RENDER_SCALE_FACTOR, V3(Chunk->DimInChunks)*GLOBAL_RENDER_SCALE_FACTOR, Quaternion());
             m4 NormalMatrix = Transpose(Inverse(ModelMatrix));
@@ -1862,11 +1878,11 @@ RenderDrawList(engine_resources *Engine, octree_node_ptr_paged_list *DrawList, s
     }
   }
 
-  if (DrawCommandsAt)
+  if (DrawCount)
   {
     GL->BindVertexArray(GetEngineResources()->Graphics.GpuHeap.Storage.Handles.VAO);
     AssertNoGlErrors;
-    MultiDrawIndirect(DrawCommandsAt, DrawCommands, MatrixData);
+    SubmitDrawList(DrawCount, Draws, MatrixData);
   }
 }
 
