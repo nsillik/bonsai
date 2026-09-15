@@ -2,13 +2,14 @@
 
 Status: **Phases 0, 1 and 2 landed; Phase 3 in progress** — PRs open on all three forks, CI for
 Phase 0/1 green on all three platforms. Phase 3 is now **smaller** than originally planned: Phase 2
-had to pull its minimum forward, the first Phase 3 session found and fixed a renderer crash, and the
-second found and fixed the renderer half of the gate (Deviations #24), built the deterministic scene
-the comparison needs (#25), and showed that what is left is the voxel data source, not the renderer
-(#26).
-See [Next session](#next-session) to pick up, [Progress](#progress) for branches, SHAs and evidence,
-and [Deviations](#deviations-from-this-plan) for what implementation turned out to differ from this
-document.
+had to pull its minimum forward, the first Phase 3 session found and fixed a renderer crash, the
+second found and fixed the renderer half of the gate (Deviations #24) and built the deterministic
+scene the comparison needs (#25), and the third closed the `terrain_gen` half: the near-empty world
+was **not** the voxel data source as #26 concluded, but a draw-buffer alias in the terrain
+decoration render target that makes Apple's GL drop the draw (Deviations #27). `terrain_gen` renders
+a coherent landscape on macOS. See [Next session](#next-session) to pick up, [Progress](#progress)
+for branches, SHAs and evidence, and [Deviations](#deviations-from-this-plan) for what
+implementation turned out to differ from this document.
 
 Goal: Bonsai builds and runs on macOS, alongside Windows and Linux.
 
@@ -23,19 +24,17 @@ already closed.
 
 What is left of Phase 3, in priority order:
 
-1. **The voxel data source on macOS** — the gate's remaining half, and the only thing between Phase 3
-   and done. The renderer is verified (#25: the smoketest scene is identical on both platforms), and
-   the defect is localised to the terrain-shaping → `R32UI` → PBO readback → finalize path (#26).
-   **Start with the third standalone probe** described at the end of #26, using the shape of the two
-   already in `examples/tools/macos_gl_probes/`: render a known pattern into an `R32UI` attachment the
-   way `render_init.cpp:769` does, read it back the way `render_loop.cpp:762` does, compare every
-   texel. If it comes back clean, then ask whether `terrain_gen` renders coherently on Linux — that
-   separates "Apple's readback diverges" from "world generation is broken on both platforms and macOS
-   merely makes it visible".
-2. **`terrain_gen` and `blank_project` under the fixed renderer.** Both run clean, but neither has been
-   looked at *with a frame* since #24 landed, and each needs the pinning of #25 before any comparison
-   means anything. The dump probe is deliberately not in the tree — re-add it, pinned, per the
-   verification method below.
+1. **The Linux half of the gate for `terrain_gen`.** macOS now renders a coherent landscape
+   (Deviations #27), which was the gate's open half. What has not been done is the *comparison*:
+   the macOS frame exists and is described in #27, a Linux frame of the same build does not. The
+   fix changes shared code (`render_init.cpp`), so it is also the first thing to re-check on Linux —
+   on Mesa the alias was benign, so the expectation is "no change", and that expectation is what
+   needs measuring rather than assuming. Use the recipe under
+   [Phase 3 progress](#phase-3--renderer-runs-in-progress), and the same state pin: both worker
+   queues and the noise-readback queue drained for ~60 frames, `tDay` fixed, top ~15 rows ignored.
+2. **`blank_project` with a frame.** Runs clean, and it does not use the terrain-shaping chain at
+   all, so #27 does not change what it does — but it has never been looked at since #24 and it is
+   the cheapest remaining item.
 3. Item 6 — the world-edit path. Blocked on brush assets, but the root cause is a **reader bug, not
    stale assets** (#18/#21): the version-shim structs are wrong, so the files are repairable, and
    regeneration is not actually possible the way #18 assumed.
@@ -105,6 +104,21 @@ were:
     dump its own back buffer instead: `glReadPixels` + `WriteBitmapToDisk` (`bitmap.cpp:203`), read
     back on the render thread just before `BonsaiSwapBuffers`. It needs `glBindFramebuffer(0)` and
     an explicit `glBindBuffer(GL_PIXEL_PACK_BUFFER, 0)` first — see Deviations #22 for both traps.
+16. **A framebuffer's `Attachments` counter is not idempotent.** `FramebufferTexture` attaches to the
+    *next* free slot and increments it, so calling it twice on the same FBO attaches the same texture
+    to two attachment points, and `SetDrawBuffers` then enables both. Apple's GL drops the draw
+    entirely, with no GL error and a `FRAMEBUFFER_COMPLETE` status; Mesa does not. Reset
+    `FBO->Attachments = 0` before re-attaching, as `render.cpp`'s RTT group does. Full failure mode in
+    Deviations #27 — this is gotcha #1's shape: silent, and only on macOS.
+17. **A probe that leaves a GL error in the queue trips the engine's `AssertNoGlErrors`**, which calls
+    `Error`, which `RuntimeBreak`s — killing the render thread before any frame is dumped. My own
+    readbacks did this. Pop the whole queue (`while (GetError()) {}`) after each probe call, and
+    expect that the engine only ever looks at the first error.
+18. **The `SMOKETEST_ENGINE_NOISE=1` control is not a control.** The engine's default shaping shader
+    puts the surface at `z ≈ 1000` with the origin chunk *entirely* solid (measured: `NoiseSum`
+    278,784 of the 64x66x66 interior), and the smoketest camera is inside it, so nothing is visible
+    whether or not rendering works. Deviations #26 read "almost nothing" from this and drew a
+    conclusion it cannot support.
 
 ---
 
@@ -127,7 +141,7 @@ on its own. Merge bottom-up.
 graph LR
   P0["Phase 0 ✅<br/>green base"] --> P1["Phase 1 ✅<br/>make.sh completes"]
   P1 --> P2["Phase 2 ✅<br/>window + input"]
-  P2 --> P3["Phase 3 🔄<br/>renderer runs<br/><i>items 1-5,7,8 in P2; crash fix landed</i>"]
+  P2 --> P3["Phase 3 🔄<br/>renderer runs<br/><i>items 1-5,7,8 in P2; crash + terrain_gen fixed</i>"]
   P1 --> P4["Phase 4<br/>native arm64"]
   P3 --> P5["Phase 5<br/>CI + release"]
   P4 --> P5
@@ -846,6 +860,11 @@ The scene — a ground slab, a three-step staircase, a column and a ridge — re
 
 ### 26. The renderer is verified; what is still wrong is the **voxel data source**
 
+**Corrected by #27 — read that first.** The defect was in the terrain-shaping *render target*, not in
+the voxel data, and the engine-noise control this entry rests on cannot discriminate (gotcha #18).
+The stage table and the readback portability note below are still accurate and were used to find it;
+the conclusion and all four candidates are superseded.
+
 The gate's remaining half, and it is not the draw path. Two runs of the *same* example, same camera,
 same renderer, differing only in where the voxels come from:
 
@@ -893,6 +912,95 @@ readback relies on the default being attachment 0, which holds today.
 does, and compare every texel. That names the stage in one run. If it comes back clean, the next
 question is whether `terrain_gen` renders coherently on Linux: if it does, Apple's readback diverges;
 if it does not, world generation is broken on both platforms and macOS merely makes it visible.
+
+### 27. The near-empty `terrain_gen` world was a draw-buffer **alias**, not the voxel data — FIXED
+
+The gate's remaining half, found and fixed. **Jesse's hint that `terrain_gen` is the only consumer of
+the modern GL features is what framed this, but the cause was neither the GLSL 4.10 downgrade nor the
+SSBO/TBO or indirect-draw work: it was a framebuffer-state bug in `render_init.cpp` that any draw
+into that target would have hit.**
+
+`terrain_gen` now renders a coherent landscape on macOS — green ground plane with yellow foliage
+filling the frame, no sky, no streaks, no slivers. Same content, in kind, as the Linux reference in
+#20's table. Dumped from the engine's own back buffer with the #25 pin (both worker queues and the
+noise-readback queue empty for 60 consecutive frames, `tDay` fixed at 5).
+
+**Which stage was losing the data.** An in-engine probe (`TEMP(INPROBE)`, since removed) read each
+stage of the terrain chain back on the CPU for the first three chunks, reporting exact counts rather
+than ranges:
+
+| stage | target | measured |
+|---|---|---|
+| shaping (`shaders/terrain/shaping/default.fragmentshader`) | 68×4624 `RGBA32F` | **all 314,432 texels written**, alpha 147,968 positive / 166,464 negative, min −2288.0 max 2003.5 — the shader's `1000 − 32z` for `z ∈ [0,67]`, `ChunkResolution = 32`. Byte-identical across runs. |
+| derivs (`derivs.fragmentshader`) | 66×4356 `RGB32F` | all 287,496 texels non-zero |
+| decoration (`decoration/default.fragmentshader`) | 66×4356 `RGBA32F` | **64 of 287,496 texels written** (252 and 508 on other runs) — everything else still held the clear value exactly |
+| finalize (`TerrainFinalize.fragmentshader`) | 66×4356 `R32UI` | bit-31 count **exactly equalled** the decoration's positive-alpha count (64/64, 252/252, 508/508) — so it covered, and it read what the decoration wrote |
+| PBO readback → `FinalizeOccupancyMasksFromNoiseValues` | — | the worker's `NoiseSum` matched the same numbers |
+
+So the chain was internally consistent from the finalize pass onward and the defect was one pass
+upstream of it: **the decoration quad drew into a target that already held the clear value
+afterwards.** Note this also retires #26's candidate 1 — the `R32UI` render, the
+`GL_RED_INTEGER`/`GL_UNSIGNED_INT` readback and the PBO path are all correct on this driver.
+
+**What it was not.** Measured, in this order:
+
+| Excluded | Evidence |
+|---|---|
+| the depth test against a depth-attachment-less FBO | the quad sits at NDC z = 1.0 and `GL_DEPTH_TEST` is enabled at that point, but `glDisable(GL_DEPTH_TEST)` before the draw changed nothing (texels still held the clear value) |
+| lost state, or draw ordering | re-stating FBO + `SetViewport` + program + uniform and drawing a *second* time also failed to cover (a different 2.4% of the target) |
+| the vertex data | the quad VBO mapped back byte-identical to `g_quad_vertex_buffer_data`, 0 of 18 floats differing |
+| viewport, scissor, blend, colour mask, draw buffer 0 | viewport (0,0,66,4356) = the target size, scissor test off, blend off, colour mask all on, `GL_DRAW_BUFFER0` = `COLOR_ATTACHMENT0` |
+| any GL error | none, at any point; and the framebuffer reports `GL_FRAMEBUFFER_COMPLETE` |
+
+**What it was.** One line of the draw-buffer list. `FramebufferTexture` (`framebuffer.cpp`) does
+`u32 Attachment = FBO->Attachments++;` — it attaches to the *next* free slot. For the decoration pass
+the target is `WorldEditRC->Framebuffers[0]`, whose texture `InitializeRenderToTextureFramebuffer`
+had already attached to attachment 0; `render_init.cpp` then attached the same texture *again*, to
+attachment 1, and `SetDrawBuffers` — which enables `FBO->Attachments` buffers — turned both on. The
+same image was therefore bound to two draw buffers.
+
+Measured with the engine's own quad and the tile's real dimensions
+(`examples/tools/macos_gl_probes/gl_drawbuffer_alias_probe.cpp`, offscreen, no window):
+
+| configuration | texels written of 287,496 | framebuffer status | GL error |
+|---|---|---|---|
+| one attachment, 1 draw buffer | 287,496 (100%) | complete | none |
+| same texture on `A0` and `A1`, 2 draw buffers — the engine's state | **0 (0.00%)** | complete | none |
+| same texture on `A0` and `A1`, 1 draw buffer — the fix | 287,496 (100%) | complete | none |
+| two *different* textures on `A0`/`A1`, 2 draw buffers | 287,496 (100%) | complete | none |
+
+Identical on x86_64 under Rosetta 2 and on arm64, so it is Apple's driver rather than the GL client.
+Mesa tolerates the alias, which is why Linux rendered correctly and this only ever showed up on
+macOS. There is no GL error, no incomplete-framebuffer warning and no shader diagnostic — the same
+shape as #14, and now [Next session](#next-session) gotcha #16.
+
+**Fix:** `TerrainDecorationRC->DestFBO->Attachments = 0;` before the re-attach in
+`src/engine/render/render_init.cpp` (Terrain Decoration), which is the idiom `render.cpp`'s RTT group
+already uses — it resets the counter for exactly this reason. Engine-side only; no `bonsai_stdlib`
+change, so this commit is one repository. The comment carries the failure mode.
+
+**What #26 got wrong, so it is not repeated:** the "engine noise renders almost nothing" control was
+read as evidence of a voxel-data defect. After the fix that control *still* shows nothing, because
+the engine's default shaping puts the surface at `z ≈ 1000` and the origin chunk comes out
+**completely** solid (measured `NoiseSum` 278,784 = 100% of the 64×66×66 interior), with the
+smoketest camera inside it — so it cannot discriminate and never could (gotcha #18). `terrain_gen`
+was the right place to look and #26's stage table is what made the probe cheap to aim.
+
+**Verified on the committed state**, macOS 26.5.2 / M4 Max / Apple clang 21, x86_64 under Rosetta 2,
+with every probe stripped (`git diff` contains no `INPROBE`):
+
+| Check | Result |
+|---|---|
+| `./make.sh` | exit 0, 0 errors |
+| `./make.sh RunTests` | exit 0, 10 test executables |
+| `terrain_gen` | 15 s, no trap, no assert, clean SIGTERM |
+| `blank_project` | 15 s, no trap, no assert, clean SIGTERM |
+| `macos_smoketest` | 10 s, no trap, no assert, clean SIGTERM |
+| `gl_drawbuffer_alias_probe` | as above, on both arches |
+
+Not yet done: the Linux run of this commit. The fix is in shared code, and on Mesa the aliased state
+was benign, so the expectation is that Linux is unchanged — which is a measurement, not an
+assumption, and is the first item in [Next session](#next-session).
 
 ---
 
@@ -1452,6 +1560,32 @@ is what feeds it. Note the loop is **not** a macOS-only fallback — it runs on 
 the shader no longer has `gl_DrawID` for a single call to read. Phase 6 gets the single call back
 under Vulkan, where `gl_DrawIndex` is 1:1.
 
+### Phase 3 progress: third 2026-09-15 session
+
+`bonsai` `PENDING_SHA`; `bonsai_stdlib` unchanged at `930f51e` (the fix is engine-side only).
+**Pushed; no PRs.**
+
+This session found and fixed the near-empty `terrain_gen` world, which was the open half of the gate.
+The cause was not the GLSL 4.10 downgrade, the SSBO→TBO conversion or the indirect-draw replacement:
+the terrain decoration render target had one texture bound to two draw buffers, and Apple's GL
+**silently discards every draw into it** — no GL error, framebuffer complete (Deviations #27).
+
+| Check | Result |
+|---|---|
+| `./make.sh` | exit 0, 0 errors |
+| `./make.sh RunTests` | exit 0, 10 test executables |
+| `terrain_gen`, frame dumped with the #25 pin | coherent green ground plane with yellow foliage, filling the frame — no sky, no streaks, none of #20's slivers |
+| `terrain_gen` / `blank_project` (15 s) / `macos_smoketest` (10 s) | no trap, no assert, clean SIGTERM |
+| `examples/tools/macos_gl_probes/gl_drawbuffer_alias_probe.cpp`, x86_64 + arm64 | 0 of 287,496 texels written with the alias; 287,496 of 287,496 with one draw buffer or with two distinct textures |
+
+The stage-by-stage readback that localised it — shaping, derivs, decoration, finalize and the PBO
+path, each read back on the CPU — is in #27's tables, and the four exclusions (depth test, lost
+state, vertex data, all the ordinary state) are there too.
+
+**Not done, and the first item next session:** the Linux run of this commit. The fix touches shared
+code, and on Mesa the aliased state was benign, so the expectation is "unchanged on Linux" — which
+has to be measured, not assumed.
+
 ### Phase 3 progress: second 2026-09-14 session
 
 `bonsai` `05eb39b5`, `c4832943`; `bonsai_stdlib` `930f51e`. **Neither pushed; no PRs.**
@@ -1528,10 +1662,20 @@ Bitmap.Pixels = U32Cursor(Pixels, Pixels + PixelCount);
 WriteBitmapToDisk(&Bitmap, "/tmp/INPROBE_frame.bmp");
 ```
 
-Convert with `sips -s format png …` and read the PNG. **Reverse the rows before writing**: the
-bitmap writer emits rows as given, and `glReadPixels` returns them bottom-up, so writing them as
-given produces an upside-down file. Log `GetError()` before and after — a stale error from earlier
-in the frame is not from this call.
+Convert with `sips -s format png …` and read the PNG. **Write the rows as given** —
+`WriteBitmapToDisk` emits them in file order and BMP stores rows bottom-up, which is the order
+`glReadPixels` returns; reversing them produces the upside-down file (measured both ways, Deviations
+#23a, which corrects an earlier claim in this section). Log `GetError()` before and after — a stale
+error from earlier in the frame is not from this call.
+
+Two corrections to the snippet above, both hit while using it:
+
+- `Allocate(u32, GetTranArena(), PixelCount)` **cannot work**: a thread's temp arena is 1 MB
+  (`DefaultThreadLocalState`, `thread.cpp`) against a 19 MB frame, and `Allocate` will `Error`. Use a
+  scratch arena with the size asked for: `Allocate(u32, AllocateArena(Megabytes(64)), PixelCount)`.
+- The probe must not leave a GL error in the queue — an engine `AssertNoGlErrors` after it calls
+  `Error` and `RuntimeBreak`s, killing the render thread before the frame is written. Pop the whole
+  queue after each probe call (gotcha #17).
 
 Two things this method surfaced, both worth knowing before the next attempt:
 
@@ -1579,27 +1723,29 @@ real hardware, and this recipe is the closest proxy available on this machine.
 
 | # | Change | Note |
 |---|---|---|
-| — | **Voxel data source on macOS** | The open half of the gate, now localised to the terrain-shaping → `R32UI` → PBO readback → finalize path (#26). Renderer is verified. Next step is the third standalone probe, then the same question on Linux |
-| — | `terrain_gen` and `blank_project` visuals | Run clean, but have not been looked at *with a frame* since #24 landed, and cannot be compared at all until the data path above is fixed (#25) |
+| — | **Linux run of the #27 fix** | The gate's other half, and the first thing to do: the fix is shared code, so re-measure `terrain_gen` on Linux with the same pin. Expectation is "unchanged", and on Mesa the aliased state rendered correctly, so a regression here would be surprising — which is exactly why it needs measuring |
+| — | `blank_project` visuals | Runs clean; does not use the terrain-shaping chain, so #27 does not change it. Never looked at *with a frame* since #24 |
 | 6 | World-edit path | Blocked on brush assets; root cause is the version-shim reader, not staleness (#18/#21) |
 | 9 | `SetVSync` | Decision made, no code change (#19). Phase 6 replaces it |
 | — | Engine log output lost on a trap, and `GL_PIXEL_PACK_BUFFER` left bound | Both hit while building the frame-dump probe (#22) |
+| — | `FBO->Attachments` is a counter, not a set | The #27 trap. Only one other re-attach site exists (`render.cpp`, which resets it) — worth a grep before any new framebuffer setup |
 | — | Spike 6.0b | Only its measurement half is left — the padding itself is landed and load-bearing (#24). Frame time and heap bytes per unit of world, `terrain_gen` at 1920x1080 |
 
 ### Gate
 
-`terrain_gen` and `blank_project` render, visually matching Linux. **The renderer half is met and
-measured** (#25: the smoketest scene is identical across platforms). **The `terrain_gen` half is not**,
-and it now has a cause rather than a symptom: with the engine's own noise the world comes out wrong,
-with hand-written voxels it does not (#26). `blank_project` has not been launched since #24 landed.
-Shader hot-reload still works (Phase 2 verified it for the game lib; the terrain-shader picker window
-is live in `terrain_gen` and reloads on click).
+`terrain_gen` and `blank_project` render, visually matching Linux. **Both halves are now met on
+macOS**: the renderer (#25 — the smoketest scene is identical across platforms, and #24 fixed the
+vertex fetch), and `terrain_gen` itself, which renders a coherent landscape from the engine's own
+noise (#27 — that was the draw-buffer alias, not the voxel data as #26 concluded). What is left is
+the other side of the comparison: a Linux run of this commit, which is the first item in
+[Next session](#next-session). `blank_project` runs clean but has not been looked at with a frame
+since #24. Shader hot-reload still works (Phase 2 verified it for the game lib; the terrain-shader
+picker window is live in `terrain_gen` and reloads on click).
 
 Optional, and the cheapest moment to do it: **spike 6.0b** (vertex-format stride padding). It needs
 nothing from Phase 6 and both strides are legal in GL, so this is the earliest point at which the
-"is it a win or only a cost?" question can be answered with real numbers. Spec is under Phase 6 →
-Blocker 1. It is also the leading suspect for the rendering mismatch, so it may stop being optional.
-Do not let it block Phase 3's gate.
+"is it a win or only a cost?" question can be answered with real numbers — and `terrain_gen` now
+renders, which is the precondition it was waiting on. Spec is under Phase 6 → Blocker 1.
 
 ---
 
@@ -1908,7 +2054,10 @@ These were not anticipated here and have already bitten once. See
 | Risk | Mitigation |
 |---|---|
 | **`glDrawArraysIndirect` crashes Apple's driver intermittently** under Rosetta, in `gldRenderVertexArray`, always on the first draw of a 1000+ command batch. Not caused by orphaning, uniforms, the TBO or sync | Draw directly — the commands are non-instanced and the shader takes its transform from the `DrawIndex` uniform. Fixed in `bcae541c`. Isolation table in Deviations #21 |
-| **Rendering differs between macOS and Linux** and only shows up once the crash is fixed: UI text is correct on both, terrain is coherent on Linux and streaky slabs on macOS | Unroot-caused; two candidates narrowed, neither confirmed. One-line discriminating experiment first, then the stride. Deviations #20 |
+| **Rendering differs between macOS and Linux** and only shows up once the crash is fixed: UI text is correct on both, terrain is coherent on Linux and streaky slabs on macOS | **Root-caused and fixed.** It was Apple fetching 3-byte vertices at a 4-byte stride — `stride = 0` over packed `v3_u8`. `gl_first_probe.cpp` isolated it in one run. Deviations #24 |
+| **A framebuffer whose two draw buffers alias one image silently drops every draw on Apple's GL** — no error, `GL_FRAMEBUFFER_COMPLETE`, and Mesa renders it correctly, so it is invisible until a macOS frame is compared. This is what left `terrain_gen` with a sparse, streaky world, and the symptom looks exactly like a data defect | Reset `FBO->Attachments = 0` before re-attaching a texture, as `render.cpp` does. `gl_drawbuffer_alias_probe.cpp` reproduces it standalone in 2 seconds, on both arches. Deviations #27, gotcha #16 |
+| **A stage-localisation probe can itself trip `AssertNoGlErrors`** and kill the render thread before it dumps anything, which reads as "the engine crashed" | Drain the GL error queue after every probe call (`while (GetError()) {}`); the engine only ever sees the first error. Gotcha #17 |
+| **An in-engine control can be invalid for reasons unrelated to the thing it is testing** — `SMOKETEST_ENGINE_NOISE=1` puts the camera inside a fully-solid chunk, so it shows nothing whether or not rendering works, and #26 read a conclusion out of it | Prefer a camera-independent measurement (the per-chunk `FilledCount`/`NoiseSum`) or move the camera; state what the control can and cannot distinguish. Gotcha #18 |
 | **Engine log output is buffered and lost on a trap.** `PrintToStdout`/`log.txt` go through `fwrite` into a `FILE*`, so the tail vanishes at SIGTRAP/SIGSEGV | Per-frame probes must write to stderr and `fflush`. An `Info` tail that seems to localise a crash is just where the buffer flushed |
 | **`CheckNoiseReadbackJobs` leaves `GL_PIXEL_PACK_BUFFER` bound**, which makes the next client-pointer `glReadPixels` a silent `GL_INVALID_OPERATION` | Unbind before any readback. Not yet fixed in the engine; recorded in Deviations #22 |
 | **`docker run -v "$PWD":/src … ./make.sh` overwrites the host's `bin/`** with Linux objects; the two platforms are distinguished only by `.dylib`/`.so`, so it is easy to run the wrong one | Build Linux in a copied tree. Deviations #23 |

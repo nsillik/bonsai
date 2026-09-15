@@ -1,7 +1,7 @@
 # macOS GL probes
 
-Two standalone offscreen GL 4.1 programs, written to isolate the macOS rendering mismatch of
-PLAN.md Deviations #24. Neither is part of `make.sh`; neither is engine code. Build and run them
+Three standalone offscreen GL 4.1 programs, written to isolate the macOS rendering mismatches of
+PLAN.md Deviations #24 and #27. None is part of `make.sh`; none is engine code. Build and run them
 directly:
 
 ```bash
@@ -21,11 +21,20 @@ clang++ -std=c++17 -O1 -DGL_SILENCE_DEPRECATION -o /tmp/probe gl_first_probe.cpp
   per frame, ~1700 draws x 60 frames) and captures both the uniform and the fetched texel per vertex.
   Found: correct, 0 mismatches in 226,936 checks.
 
-Both render nothing (`GL_RASTERIZER_DISCARD`) and read results back numerically, so they need no
-window, no screenshots and no interpretation. **Keep that shape for the next one:** the question that
-is still open (PLAN.md Deviations #26) is the same kind — render a known pattern into an `R32UI`
-attachment the way `render_init.cpp:769` does, read it back the way `render_loop.cpp:762` does, and
-compare every texel.
+- `gl_drawbuffer_alias_probe.cpp` — does a draw into a framebuffer whose two draw buffers alias the
+  *same* image write anything? Four framebuffer configurations, each cleared to a sentinel and drawn
+  into with the engine's own quad, counting the texels that still hold the sentinel. Found: with one
+  texture on `COLOR_ATTACHMENT0` **and** `COLOR_ATTACHMENT1` and two enabled draw buffers, **0 of
+  287,496 texels are written**, the framebuffer still reports `GL_FRAMEBUFFER_COMPLETE` and no GL
+  error is raised. Same texture with one draw buffer: 287,496/287,496. Two *different* textures on
+  the two attachments with two draw buffers: 287,496/287,496, so it is the alias and not the count.
+  Identical on x86_64 under Rosetta and on arm64, so it is the driver, not the GL client. This is the
+  bug that left `terrain_gen` with a near-empty world; the fix is to reset `FBO->Attachments` before
+  re-attaching (`render_init.cpp`, Terrain Decoration).
+
+All three render nothing (`GL_RASTERIZER_DISCARD` in the first two; the third reads back a sentinel)
+and produce numbers rather than screenshots, so they need no window and no interpretation. **Keep
+that shape for the next one.**
 
 Build both ways to tell an Apple driver bug from a Rosetta GL-client bug:
 

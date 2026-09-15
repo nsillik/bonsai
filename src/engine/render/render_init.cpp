@@ -745,6 +745,14 @@ GraphicsInit(graphics *Result, engine_settings *EngineSettings, memory_arena *Gr
 
     GetGL()->BindFramebuffer(GL_FRAMEBUFFER, TerrainDecorationRC->DestFBO->ID);
 
+    // NOTE(nsillik)(macos): FramebufferTexture attaches to the *next* free slot and increments
+    // FBO->Attachments.  This FBO already has its texture on attachment 0 -- it comes from
+    // InitializeRenderToTextureFramebuffer above -- so without the reset the same texture also
+    // lands on attachment 1 and SetDrawBuffers enables both, aliasing one image across two draw
+    // buffers.  Mesa tolerates that; Apple's GL silently drops almost every fragment of every draw
+    // into it, with no GL error, which is what left terrain_gen with a nearly-empty world.
+    // render.cpp's RTT group resets Attachments for the same reason.
+    TerrainDecorationRC->DestFBO->Attachments = 0;
     FramebufferTexture(TerrainDecorationRC->DestFBO, TerrainDecorationRC->DestTex);
     SetDrawBuffers(TerrainDecorationRC->DestFBO);
 
