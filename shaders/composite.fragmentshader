@@ -109,17 +109,10 @@ vec3 agxLook(vec3 val) {
 #if 1
   switch (ToneMappingType)
   {
-    // NOTE(nsillik)(macos): There is deliberately no case for ToneMappingType 3 -- it means
-    // "use the defaults", and offset/slope/power/sat are already set to them above, so the
-    // absent case and a no-op case are the same thing.
-    //
-    // This used to read `case 3: {} break;`, which kills Apple's core-profile GLSL compiler:
-    // an empty compound statement inside a switch segfaults it in glpLLVMCGSwitchStatement,
-    // in the *linker*, so the only symptom is a SIGSEGV out of glLinkProgram with no
-    // diagnostic.  Measured at #version 410 core on Apple M4 Max / "4.1 Metal - 91.7" with
-    // this file: `case 3: {} break;` SIGSEGV 6 of 6 runs; this spelling 0 of 6.  The same
-    // constraint applies to any case whose body is only comments, which is why
-    // terrain/world_edit.fragmentshader drops the braces on five of its cases.
+    // NOTE(nsillik)(macos): ToneMappingType 3 means "use the defaults", which offset/slope/
+    // power/sat already are above, so there is deliberately no case for it.  Never write a case
+    // body as `{}` -- Apple's GLSL linker segfaults on an empty compound statement.  See
+    // docs/macos_port.md.
 
     case 4:
     {

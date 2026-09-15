@@ -56,13 +56,9 @@ SegfaultHandler(int sig, siginfo_t *si, void *data)
   ucontext_t *uc = (ucontext_t *)data;
   u32 instruction_length = 3; // TODO(Jesse, id: 115, tags: tests, robustness): Does this work all the time on x64?
 #if BONSAI_MACOS
-  // NOTE(nsillik)(macos): On Darwin uc_mcontext is a *pointer* to a __darwin_mcontext64
-  // and the instruction pointer is __ss.__rip, rather than the gregs[] array indexed by
-  // REG_RIP on Linux.
-  //
-  // TODO(nsillik)(macos): arm64 spells this __ss.__pc.  This build is x86_64 only (see
-  // the -target in external/bonsai_stdlib/scripts/setup_for_cxx.sh), so that spelling is
-  // deliberately not guessed at here.
+  // NOTE(nsillik)(macos): Darwin's uc_mcontext is a *pointer* to a __darwin_mcontext64 and the
+  // instruction pointer is __ss.__rip, rather than the gregs[]/REG_RIP spelling Linux uses.
+  // (arm64 spells it __ss.__pc; this build is x86_64 only, see setup_for_cxx.sh.)
   uc->uc_mcontext->__ss.__rip += instruction_length;
 #else
   uc->uc_mcontext.gregs[REG_RIP] += instruction_length;

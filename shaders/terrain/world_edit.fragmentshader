@@ -69,25 +69,16 @@ struct world_edit_op
   f32 Pad9;
 };
 
-// NOTE(nsillik)(macos): This was
-//
-//   layout(std430, binding = 0) readonly buffer WorldEditOpBuffer { world_edit_op Ops[]; };
-//
-// which needs GLSL 4.30 to spell and is absent from the 4.1 core context macOS caps at, so
-// it is a texture buffer instead.  A TBO is core since 3.1 and imposes no layout: texel N is
-// bytes [16N, 16N+16), so LoadOp reassembles the struct from consecutive texels and the C++
-// world_edit_op in src/engine/editor.h is untouched.
-//
-// world_edit_op is 272 bytes = 17 texels of GL_RGBA32F, and the Pad members that are already
-// there to keep it 16-byte aligned are what make the mapping regular: every field sits at a
-// fixed texel and component, with none straddling two texels.
+// NOTE(nsillik)(macos): A texture buffer rather than the std430 block this was, which needs
+// GLSL 4.30.  Texel N is bytes [16N, 16N+16), so LoadOp reassembles the struct from consecutive
+// texels and the C++ world_edit_op in src/engine/editor.h is untouched.  Its Pad members are
+// what keep every field on a fixed texel and component.  See docs/macos_port.md.
 uniform samplerBuffer WorldEditOpBuffer;
 
 #define WORLD_EDIT_OP_TEXEL_COUNT 17
 
 // NOTE(nsillik)(macos): floatBitsToInt and not int(), because these members hold raw s32 bit
-// patterns that the buffer hands back as floats.  floatBitsToInt reinterprets; int() would
-// truncate, silently corrupting anything not exactly representable as a float.
+// patterns that the buffer hands back as floats.  int() would truncate them.
 world_edit_op
 LoadOp(int Index)
 {
@@ -443,17 +434,9 @@ void BlendSample(
       Blended = iq_opSmoothUnion(Accumulator, ThisSample, 1.f);
     } break;
 
-    // NOTE(nsillik)(macos): Both of these are unimplemented on purpose and leave Blended at
-    // its pre-switch value, which is what an absent case does too -- so there is nothing to
-    // fill in.  They are written as a bare `break` rather than `{ } break` because Apple's
-    // core-profile GLSL compiler segfaults in glpLLVMCGSwitchStatement on an *empty compound
-    // statement* inside a switch, and it does so in the linker, so the whole symptom is a
-    // SIGSEGV out of glLinkProgram with no diagnostic.  Measured on the same construct in
-    // composite.fragmentshader at #version 410 core, Apple M4 Max / "4.1 Metal - 91.7":
-    // `case 3: {} break;` SIGSEGV 6 of 6 runs, `case 3: break;` 0 of 6.
-    //
-    // A body containing only comments is empty by the same rule -- a comment is not a
-    // statement -- which is what the other three sites in this file are.
+    // NOTE(nsillik)(macos): Unimplemented on purpose: an absent case leaves Blended at its
+    // pre-switch value too.  Written as a bare `break`, never `{} break` -- Apple's GLSL linker
+    // segfaults on an empty compound statement.  See docs/macos_port.md.
     case 4: // WorldEdit_Mode_SmoothIntersection
     break;
 
@@ -524,8 +507,9 @@ void BlendSample(
     } break;
 #endif
 
-    // NOTE(nsillik)(macos): Upstream's commented-out body, kept as the record of what was
-    // tried.  Only comments is an empty body; see the note on the SampleMode cases above.
+    // NOTE(nsillik)(macos): Commented-out bodies, kept as the record of what was tried.  A body
+    // of only comments is an empty body; write `break;` and never `{} break;`.  See
+    // docs/macos_port.md.
     case 0: // WorldEdit_ColorBlendMode_ValuePositive
       /* b32 ThisSampleCloserToBlendThanAccumulator = Foo > BrushColorBlendBias; */
       /* /1* ColorValue = V3(0,1,1); *1/ */
@@ -553,7 +537,6 @@ void BlendSample(
     case 1: // WorldEdit_ColorBlendMode_ValueNegative
     { if (ThisSample < 0.f) { ColorValue = ColorSample; } } break;
  
-    // NOTE(nsillik)(macos): Commented-out body, as above.
     case 2: // WorldEdit_ColorBlendMode_Surface
       /* if (InitialAccumulator <= 0.f) */
       /* { */

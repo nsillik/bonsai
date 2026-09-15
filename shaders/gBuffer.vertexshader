@@ -25,20 +25,13 @@ struct transform_data
   mat4 NormalMatrix;
 };
 
-// NOTE(nsillik)(macos): This was
-//
-//   layout(std430, binding = 0) readonly buffer TransformBuffer { transform_data Transforms[]; };
-//
-// which needs GLSL 4.30 -- both to spell a shader storage block and to index it with
-// gl_DrawID.  macOS caps at 4.10, so it is a texture buffer here instead.  A TBO is core
-// since 3.1 and imposes no layout: texel N is bytes [16N, 16N+16), so LoadTransform
-// reassembles the struct from consecutive texels and the C++ render_matrix_pair is unchanged.
-//
-// sizeof(render_matrix_pair) is 128 = 8 texels of GL_RGBA32F.
+// NOTE(nsillik)(macos): A texture buffer rather than the std430 block this was, which needs
+// GLSL 4.30.  Texel N is bytes [16N, 16N+16), so LoadTransform reassembles the struct from
+// consecutive texels and the C++ render_matrix_pair is unchanged (128 bytes = 8 texels).
+// See docs/macos_port.md.
 uniform samplerBuffer TransformBuffer;
 
-// NOTE(nsillik)(macos): Stands in for gl_DrawID, which is GLSL 4.60
-// (GL_ARB_shader_draw_parameters).  SubmitDrawList uploads it once per draw.
+// NOTE(nsillik)(macos): Stands in for gl_DrawID (GLSL 4.60).  SubmitDrawList uploads it per draw.
 uniform int DrawIndex;
 
 #define TRANSFORM_TEXEL_COUNT 8

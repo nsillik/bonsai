@@ -678,22 +678,13 @@ DrainLoRenderQueue(engine_resources *Engine)
                     s32 MaxFragShaderTexUnits = 0;
                     GL->GetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS_ARB, &MaxFragShaderTexUnits);
 
-                    // NOTE(nsillik)(macos): This was glBindBufferBase(GL_SHADER_STORAGE_BUFFER)
-                    // feeding a std430 block, which needs GL 4.3.  A texture buffer is the same
-                    // memory read as 16-byte texels and works on the 4.1 core context macOS
-                    // caps at.
+                    // NOTE(nsillik)(macos): A texture buffer where this fed a std430 block, which
+                    // needs GL 4.3.  See docs/macos_port.md.
                     //
-                    // It takes the last fragment texture unit, which the samplers above are
-                    // already using: TexUnit starts at 0 for InputTex and advances once per
-                    // colour layer.  A collision would rebind a sampler to the wrong texture
-                    // rather than fail, so it traps here.
-                    //
-                    // TexUnit is a *count*, so this admits units 0..SHADER_TEXTURE_BUFFER_UNIT-1
-                    // and the TBO takes the last one: 14 colour layers.  That is one fewer than
-                    // the 15 a std430 block allowed, since a buffer binding consumed no texture
-                    // unit.  MAX_BRUSH_LAYERS is 16, so a brush past 14 layers now traps rather
-                    // than silently rebinding -- deliberate, but it is a ceiling this change
-                    // moved.
+                    // It takes the last fragment texture unit.  TexUnit is a count, so this
+                    // admits units 0..14 and the TBO takes 15: 14 colour layers, one fewer than
+                    // the std430 block allowed, while MAX_BRUSH_LAYERS is 16.  A collision would
+                    // rebind a sampler rather than fail, so it traps.
                     Assert(TexUnit <= SHADER_TEXTURE_BUFFER_UNIT);
 
                     {
@@ -890,11 +881,8 @@ CheckNoiseReadbackJobs(engine_resources *Engine, graphics *Graphics, platform *P
 
         // NOTE(nsillik)(macos): Unbind immediately.  A pack buffer left bound turns any later
         // *client-pointer* glReadPixels into a silent GL_INVALID_OPERATION that writes nothing,
-        // which reads as "the renderer drew nothing" rather than as an error.  Nothing in this
-        // tree does that -- the only other glReadPixels binds its own pack buffer first -- but
-        // the frame-capture harness the port was verified with does, and this is what made that
-        // harness's first frame comparison show zero pixels.  Unbinding does not unmap; the
-        // mapping stays valid until UnmapBuffer, which is what the worker does with it.
+        // which reads as "the renderer drew nothing".  Unbinding does not unmap; the mapping
+        // stays valid until UnmapBuffer, which is what the worker does with it.
         GetGL()->BindBuffer(GL_PIXEL_PACK_BUFFER, 0);
         AssertNoGlErrors;
 

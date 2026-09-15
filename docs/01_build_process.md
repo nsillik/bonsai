@@ -13,12 +13,11 @@ Follow the instructions for fetching dependencies for bonsai_stdlib [https://git
 
 ## macOS
 
-The toolchain dependency is the Xcode Command Line Tools, `xcode-select --install`;
-Cocoa, OpenGL and IOKit come from the SDK.  Nothing else is needed -- in particular
-not a compiler from Homebrew, which would shadow Apple clang.
+The only toolchain dependency is the Xcode Command Line Tools, `xcode-select --install`;
+Cocoa, OpenGL and IOKit come from the SDK.
 
 ```bash
-git clone --recursive https://github.com/nsillik/bonsai bonsai && cd bonsai
+git clone --recursive https://github.com/scallyw4g/bonsai bonsai && cd bonsai
 ./make.sh && ./make.sh RunTests
 ./bin/game_loader ./bin/game_libs/terrain_gen_loadable.dylib
 ```
@@ -30,46 +29,16 @@ Two things about the macOS build are worth knowing before reading a diff:
   `external/bonsai_stdlib/scripts/setup_for_cxx.sh` passes
   `-target x86_64-apple-macos11`.  On Apple Silicon the binaries are therefore x86_64 and
   are executed through Rosetta; installing it is part of the `build-macos` CI job for the
-  same reason.  Anything that inspects the *host* arch, or reads `_SC_PAGESIZE` under
-  Rosetta, is looking at the translation, not the machine.
-* **The Rosetta has to implement AVX2 and FMA.**  Those flags are not decoration -- every
-  x86_64 binary the tree produces uses them (`otool -tv` on a test binary shows vpermps,
-  vfmadd231ss, vbroadcastss).  A Rosetta without them does not fail a suite, it dies with
-  `Illegal instruction: 4` before the binary prints anything, which reads as "the tests are
-  broken" rather than "the translation is too old".  macOS 14 is such a host; the CI job
-  therefore pins `macos-26`.
+  same reason.
 * **Every file is compiled as Objective-C++** (`-x objective-c++`), because the engine is one
   translation unit per target and `platform/macos/macos_platform.cpp` uses AppKit directly.
-  There is no `.mm` shim.  Objective-C++ is a superset of C++, so nothing else in the tree
-  notices.
+  Objective-C++ is a superset of C++ meaning there should be no effect.
 
 The macOS backend drives a **4.1 core** GL context, which is the highest macOS offers.  A few
-GL 4.3/4.5 entry points the tree used are therefore unavailable; where that changed the code
-rather than just the loader, the site carries a `NOTE(nsillik)(macos)` explaining it.  The
-port as a whole is written up in [docs/macos_port.md](macos_port.md).
+GL 4.3/4.5 features are therefore unavailable; where that changed the code (rather than just
+the loader), the site carries a `NOTE(nsillik)(macos)` explaining it.
 
-### Reference Linux build
-
-Comparing a renderer across platforms needs a Linux build of the same commit.  Build in a
-**copied** tree, not a bind mount of the working repo -- `./make.sh` writes to `./bin`, so a
-bind mount silently overwrites the host's macOS binaries with ELF objects:
-
-```bash
-tar --exclude=.git --exclude=bin --exclude='*.dSYM' -cf - . | (cd /tmp/linuxsrc && tar -xf -)
-docker run --rm --platform linux/amd64 -v /tmp/linuxsrc:/src -w /src ubuntu:24.04 bash -lc '
-  apt-get update -qq &&
-  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq clang-18 libx11-dev freeglut3-dev xvfb &&
-  ln -sf /usr/bin/clang++-18 /usr/local/bin/clang++ &&
-  ./make.sh'
-```
-
-`make.sh` hardcodes `COMPILER="clang++"`, and the Ubuntu package installs `clang++-18` only,
-which is what the symlink is for.
-
-Under llvmpipe both `MESA_GL_VERSION_OVERRIDE=4.6` and `MESA_GLSL_VERSION_OVERRIDE=460` are
-required: without them it reports GL 4.5, `#version 460` fails to compile, and
-`InitializeShadowRenderGroup` asserts with an empty log.  That is a software-rendering
-limitation, not a code problem.
+See [macos_port.md](macos_port.md) for the port itself.
 
 ## Quickstart
 

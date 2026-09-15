@@ -2219,16 +2219,10 @@ struct world_edit_op
 };
 #pragma pack(pop)
 
-// NOTE(nsillik)(macos): shaders/terrain/world_edit.fragmentshader reads this struct through a
-// texture buffer as 17 GL_RGBA32F texels -- see LoadOp there -- because a std430 shader
-// storage block is not available at GLSL 4.10.  So its size and every field offset are
-// load-bearing in a file the compiler cannot cross-check.  The Pad members are what keep
-// those offsets regular: each field lands at a fixed texel and component, and none straddles
-// two texels.
-//
-// Together these pin both ends of the layout.  A member whose size changes moves Pad9 and
-// fails; a member whose *type* changes without changing its size would not, so the real
-// guard on a struct edit is still LoadOp.
+// NOTE(nsillik)(macos): world_edit.fragmentshader reads this struct through a texture buffer as
+// 17 GL_RGBA32F texels (see LoadOp there), so its size and every field offset are load-bearing
+// in a file the compiler cannot cross-check.  The Pad members are what keep the offsets regular.
+// See docs/macos_port.md.
 CAssert(sizeof(world_edit_op) == 272);
 CAssert(offsetof(world_edit_op, Pad9) == 268);
 

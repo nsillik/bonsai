@@ -1716,18 +1716,13 @@ SubmitDrawList(u32 DrawCount, draw_arrays_command *Draws, render_matrix_pair *Ma
 
   u32 RequiredMatrixBufferSize = Cast(GLsizeiptr, sizeof(render_matrix_pair))*DrawCount;
 
-  // NOTE(nsillik)(macos): This was a glBindBufferBase(GL_SHADER_STORAGE_BUFFER) feeding the
-  // std430 block in gBuffer.vertexshader.  A texture buffer is the same data read as texels,
-  // and is available on the 4.1 core context macOS caps at, where shader storage buffers are
-  // not.
+  // NOTE(nsillik)(macos): A texture buffer rather than the glBindBufferBase that fed the std430
+  // block in gBuffer.vertexshader, which needs GL 4.3.  See docs/macos_port.md.
   //
-  // NOTE(nsillik): This binds by *name*, against whatever program is currently bound -- both
-  // here and for DrawIndex below.  The invariant is therefore that the caller has the
-  // gBuffer shader bound, which is the only program that declares either.  Every caller
-  // satisfies it, but not by construction: RenderDrawList ignores its Shader parameter and
-  // relies on the render command stream having emitted SetupShader first.  A draw list whose
-  // command names a different shader (the ShadowMap one, say) would trap here rather than
-  // draw anything, which is what the two asserts below are for.
+  // Both this and DrawIndex below resolve by *name* against whatever program is bound, so the
+  // caller must have the gBuffer shader bound -- the only one that declares either.  Every
+  // caller does, but not by construction: RenderDrawList ignores its Shader parameter and relies
+  // on the render command stream having emitted SetupShader first.
   BindTextureBuffer(&TransformBufferBinding, "TransformBuffer", MatrixData, RequiredMatrixBufferSize);
 
   {
@@ -1774,12 +1769,10 @@ RenderDrawList(engine_resources *Engine, octree_node_ptr_paged_list *DrawList, s
 {
   auto GL = GetGL();
 
-  // NOTE(nsillik): `Shader` is unused, and deliberately so -- the draws below go through
-  // SubmitDrawList, which resolves TransformBuffer and DrawIndex against whatever program is
-  // bound.  Keeping the parameter is what lets the render command carry the shader it means,
-  // and binding it here is the obvious "fix" if a second draw-list consumer ever appears; it
-  // is not done today because the only other one (the ShadowMap list) passes Camera == 0 and
-  // so accumulates no draws at all -- see below.
+  // NOTE(nsillik): `Shader` is unused: the draws below go through SubmitDrawList, which resolves
+  // its uniforms against whatever program is bound.  Keeping the parameter is what lets the
+  // render command carry the shader it means, and binding it here is the obvious fix if a second
+  // draw-list consumer ever appears.  See the note on the `if (Camera)` below.
 
   // TODO(Jesse): Turn this into an assert; there's no reason to have a draw command with an empty draw list!
   if (DrawList->ElementCount == 0) return;
@@ -1840,12 +1833,10 @@ RenderDrawList(engine_resources *Engine, octree_node_ptr_paged_list *DrawList, s
           Basis += GetSimSpaceP(World, Chunk->WorldP);
         }
 
-        // NOTE(nsillik): Every DrawCount++ lives under this `if (Camera)`, so a draw list
-        // submitted without a camera accumulates nothing and SubmitDrawList is skipped by the
-        // `if (DrawCount)` below.  That is load-bearing and easy to miss: the ShadowMap list
-        // is pushed alongside this one for the same chunks and its render command passes
-        // Camera == 0, which is why it never issues a draw (and why it never reaches
-        // SubmitDrawList's asserts, whose program does not declare its uniforms).
+        // NOTE(nsillik): Every DrawCount++ is under this `if (Camera)`, so a draw list submitted
+        // without a camera accumulates nothing and SubmitDrawList is skipped below.  That is why
+        // the ShadowMap list -- pushed alongside this one, with Camera == 0 -- never issues a
+        // draw, and never reaches SubmitDrawList's asserts either.
         if (Camera)
         {
           if (Chunk->OcclusionQueryId == 0)

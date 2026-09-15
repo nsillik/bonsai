@@ -37,13 +37,10 @@
 // a switch to fall-back to 330core.  The browser requires 310es.
 //
 
-// NOTE(nsillik)(macos): The active line names ShaderLanguageSetting_430core, which is not a
-// member of shader_language_setting, so it parses to {} == 460core.  The value is inert
-// either way: the engine parses Settings.Graphics.ShaderLanguage but nothing reads it (the
-// load is commented out in src/engine/resources.cpp).  The language actually used comes from
-// CompileShaderPair, which picks ShaderLanguageSetting_410core on macOS and the default
-// (460core) everywhere else.  Left commented rather than renamed, so it does not read as a
-// working override.
+// NOTE(nsillik)(macos): Inert.  Nothing reads Settings.Graphics.ShaderLanguage -- its load is
+// commented out in src/engine/resources.cpp -- and the language actually used comes from
+// CompileShaderPair, which picks 410core on macOS and the default elsewhere.  Left commented so
+// it does not read as a working override.
 //
 // shader_language = ShaderLanguageSetting_410core
 // shader_language = ShaderLanguageSetting_330core

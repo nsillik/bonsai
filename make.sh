@@ -190,11 +190,9 @@ function BuildWithClang
 
   [[ $BuildExecutables == 1     || $BUILD_EVERYTHING == 1 ]] && BuildExecutables
 
-  # NOTE(nsillik)(macos): The wipe lives here, not in BuildTests, because every compile below is
-  # backgrounded (see TrackPid) and only waited on at WaitForTrackedPids.  From inside BuildTests
-  # it therefore ran *after* the debug-only test compiles had been launched, and could delete a
-  # binary one of them had already written -- reachable now that BuildDebugOnlyTests is enabled on
-  # macOS.  Wiping first removes the ordering dependence.
+  # NOTE(nsillik)(macos): Wiped here rather than in BuildTests, because every compile below is
+  # backgrounded (TrackPid) and only waited on at WaitForTrackedPids: a wipe inside BuildTests ran
+  # after the debug-only compiles had started, and could delete what one of them had written.
   if [[ $BuildTests == 1 || $BUILD_EVERYTHING == 1 ]]; then
     rm -Rf bin/tests/ && mkdir bin/tests
   fi
@@ -404,10 +402,9 @@ SetBuildAllFlags() {
   BuildExecutables=1
   BuildTests=1
 
-  # NOTE(nsillik)(macos): Now also built on macOS; the one test in the list needed the
-  # Darwin spelling of the sigcontext (src/tests/allocation.cpp).
-  # NOTE(Jesse): These only build on linux.  I'm honestly not sure if it's
-  # worth getting them to build on Windows
+  # NOTE(nsillik)(macos): Built on macOS too now; the one test in the list needed the Darwin
+  # spelling of the sigcontext (src/tests/allocation.cpp).
+  # NOTE(Jesse): I'm honestly not sure it's worth getting these to build on Windows
   if [ $Platform == "Linux" ] || [ $Platform == "macOS" ]; then
     BuildDebugOnlyTests=1
   fi

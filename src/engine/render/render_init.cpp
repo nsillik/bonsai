@@ -745,14 +745,8 @@ GraphicsInit(graphics *Result, engine_settings *EngineSettings, memory_arena *Gr
 
     // NOTE(nsillik)(macos): Deliberately not re-attached.  Framebuffers[0] came out of
     // InitializeRenderToTextureFramebuffer above already carrying this texture on draw buffer 0
-    // with its draw buffers set, so this block only has to bind it and check it.
-    //
-    // It used to call FramebufferTexture + SetDrawBuffers here, which attached the same image a
-    // second time -- to slot 1 -- and turned both draw buffers on.  Apple's GL answers one image
-    // bound to two draw buffers by silently discarding every fragment of every draw into that
-    // framebuffer: no GL error, GL_FRAMEBUFFER_COMPLETE.  That is what left terrain_gen with a
-    // nearly-empty world, and why the aliased state was invisible until frames were compared.
-    // Mesa renders it correctly, so it only ever showed up on macOS.
+    // with its draw buffers set, and attaching an image that is already attached binds it to a
+    // second slot.  See docs/macos_port.md.
     GetGL()->BindFramebuffer(GL_FRAMEBUFFER, TerrainDecorationRC->DestFBO->ID);
 
     Ensure(CheckAndClearFramebuffer());

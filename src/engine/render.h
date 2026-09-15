@@ -16,10 +16,9 @@ struct world_chunk;
 // transform comes from the DrawIndex uniform and the MatrixData uploaded alongside, not from
 // the command.
 //
-// This was DrawArraysIndirectCommand, filled into a GL_DRAW_INDIRECT_BUFFER and issued with
-// glMultiDrawArraysIndirect -- GL 4.3, absent from the 4.1 core context macOS caps at.  The
-// draws are direct now and the shader reads its transform from the DrawIndex uniform rather
-// than gl_DrawID, so InstanceCount and BaseInstance were written every frame and never read.
+// This was DrawArraysIndirectCommand, issued with glMultiDrawArraysIndirect -- GL 4.3, and
+// absent from the 4.1 core context macOS caps at.  InstanceCount and BaseInstance were written
+// every frame and never read.  See docs/macos_port.md.
 struct draw_arrays_command
 {
   u32 First;

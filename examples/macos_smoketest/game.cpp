@@ -1,21 +1,13 @@
-// NOTE(nsillik)(macos): A deliberately tiny, fully deterministic scene, for comparing the macOS
-// renderer against the Linux one.
+// NOTE(nsillik)(macos): A deliberately tiny, fully deterministic scene, for comparing renderers
+// across platforms.  `terrain_gen` cannot be compared across runs -- GPU noise, chunks streaming
+// in on workers, and a day/night cycle driven by wall-clock time -- so there is no telling a
+// rendering bug from a scene that happened to be in a different state.
 //
-// Why it exists: `terrain_gen` cannot be compared across runs.  Its voxels come from a GPU noise
-// shader, its chunks stream in on worker threads, and its day/night cycle advances with accumulated
-// wall-clock time -- measured, two runs of the *same* binary at the same FrameIndex differed in 45%
-// of the frame's bytes.  With no fixed reference there is no way to tell a rendering bug from a
-// scene that happened to be in a different state.
-//
-// So this example defines the world by hand.  The engine finalizes a chunk's voxels from a 66^3
-// buffer of u32 "noise" values, where bit 31 means "this voxel is filled" and the low bits are the
-// voxel's material data (FinalizeOccupancyMasksFromNoiseValues).  ChunkCompletionCallbacks are
-// invoked on that buffer *before* it is finalized, which is the hook used here: every value written
-// below is a pure function of the voxel's world position.  So the voxels are identical on macOS and
-// Linux with no dependence on noise, GPU float behaviour, seeds or timing, and with the day/night
-// cycle off and tDay pinned the frames differ only by rendering.
-//
-// The scene is chosen to be readable in one screenshot:
+// The world is written by hand instead.  The engine finalizes a chunk's voxels from a 66^3 buffer
+// of u32 "noise" values (bit 31 is "this voxel is filled", the low bits are its material), and
+// ChunkCompletionCallbacks run on that buffer *before* it is finalized -- which is the hook used
+// here.  Every value written below is a pure function of the voxel's world position, so the voxels
+// are identical on every platform regardless of noise, float behaviour, seeds or timing.
 //
 //      z ^                            a green ground slab, 8 voxels thick, over the whole world
 //        |   ............             a red column, 8x8x16 at (16,16)
@@ -23,21 +15,17 @@
 //        |   ............             a yellow ridge along x at y in [56,62), 8 voxels tall
 //        +------------------------> x
 //
-// Rendering it is the test: the ground must be a flat unbroken quad grid, the staircase must read as
-// three separate steps, and the column must be a clean vertical box.  Anything streaky, half-missing
-// or z-fighting is a renderer bug, and because the frame is reproducible it can be diffed directly
-// against the Linux one.
+// Rendering it is the test: the ground must be a flat unbroken quad grid, the staircase must read
+// as three separate steps, and the column must be a clean vertical box.  Anything streaky,
+// half-missing or z-fighting is a renderer bug.
 
 #define BONSAI_DEBUG_SYSTEM_API 1
 
 #include <bonsai_types.h>
 #include <game_types.h>
 
-// NOTE(nsillik): The smallest visible region there is, so the world settles immediately.  It is
-// one 64^3 chunk, not a grid of them: the root node's resolution is the visible region, and
-// OctreeLeafShouldSplit only splits a node whose resolution exceeds V3i(1).  The whole pattern
-// fits in that chunk, which is why it can be compared frame-for-frame without chunk streaming
-// being a variable.
+// NOTE(nsillik): Smallest visible region there is, so the world settles immediately: one 64^3
+// chunk, which the whole pattern fits in, so chunk streaming is not a variable.
 #define SMOKETEST_WORLD_SIZE VisibleRegionSize_1
 
 // Ground slab: z in [0, SMOKETEST_GROUND_THICKNESS).
@@ -98,9 +86,8 @@ SmokeTestChunkCompletion(engine_resources *Engine, v3i NoiseDim, u32 *NoiseValue
   Assert(Chunk);
   Assert(NoiseDim == V3i(66, 66, 66));
 
-  // Voxel coordinate of the chunk's corner.  Noise coord (nx, ny, nz) corresponds to the gen
-  // chunk's voxel (nx-1, ny, nz) and to the drawn chunk's (nx-1, ny-1, nz-1), which is what makes
-  // one chunk's apron voxels agree with its neighbour's interior voxels.
+  // Noise coord (nx, ny, nz) is this chunk's voxel (nx-1, ny-1, nz-1): see
+  // FinalizeOccupancyMasksFromNoiseValues and the DestChunk copy in api.cpp.
   v3i ChunkMinVoxelP = Chunk->WorldP * V3i(64);
 
   RangeIterator_t(s32, nz, NoiseDim.z)
@@ -166,34 +153,23 @@ BONSAI_API_MAIN_THREAD_INIT_CALLBACK()
   world_position WorldCenter = World_Position(0, 0, 0);
   AllocateWorld(World, WorldCenter, SMOKETEST_WORLD_SIZE);
 
-  // NOTE(nsillik): The voxels are always written by hand here; that is what makes this example's
-  // frame a pure function of voxel position.
-  //
-  // There was briefly an env switch that left them to the engine's own GPU-noise path, as a control
-  // for "is the renderer wrong, or the world".  It could not discriminate: the engine's default
-  // shaping puts the surface at z ~ 1000 and the origin chunk comes out entirely solid, with this
-  // camera inside it, so it rendered nothing whether or not rendering worked.  Do not reintroduce it
-  // without also moving the camera somewhere it can see the surface.
+  // NOTE(nsillik): The voxels are always written by hand; that is what makes this frame a pure
+  // function of voxel position.
   chunk_completion_callback CompletionCallback = SmokeTestChunkCompletion;
   Push(&Resources->ChunkCompletionCallbacks, &CompletionCallback);
 
   // NOTE(nsillik): Pin the lighting.  Left on, the sun moves with accumulated wall-clock time and
-  // two runs of the same binary produce different frames.
+  // two runs of the same binary produce different frames; tDay 5 is the value at which the frame
+  // depends only on the voxels.
   Graphics->Settings.Lighting.AutoDayNightCycle = False;
-  // NOTE(nsillik): 5 is measured, not guessed.  UpdateKeyLight derives the sun's direction and
-  // colour from tDay and most values park it below the horizon; sweeping tDay and measuring the mean
-  // luminance of the frame gives 0 -> 0.0, 1 -> 14.6, 3 -> 5.3, 5 -> 26.5, 6 -> 7.9.  At 5 the
-  // frame depends only on the voxels.
   Graphics->Settings.Lighting.tDay = 5.f;
 
-  // NOTE(nsillik): No debug overlays that would change the image; this example is only interested in
-  // the voxels it writes itself.
+  // NOTE(nsillik): No debug overlays, so nothing but the voxels affects the image.
   Graphics->Settings.DrawMajorGrid = False;
   Graphics->Settings.DrawMinorGrid = False;
 
-  // NOTE(nsillik): No StandardCamera call here.  SnapCameraToCenterOfWorld issues one itself
-  // (5000000 far clip, 50000 distance) and StandardCamera starts with `*Camera = {}`, so anything
-  // set here would be discarded a line later.
+  // NOTE(nsillik): No StandardCamera call needed: SnapCameraToCenterOfWorld issues one itself, and
+  // StandardCamera resets the camera, so anything set before it is discarded.
   SnapCameraToCenterOfWorld(Resources, SMOKETEST_WORLD_SIZE);
 
   // Look down at the scene from far enough that the whole pattern is in frame.
