@@ -243,8 +243,18 @@ with `glReadPixels` and writing a BMP -- the pack-buffer and read-back-buffer no
 reproducible from this branch without rewriting it; a like-for-like Linux frame has not been
 diffed (see Known gaps).  With that:
 
-* `terrain_gen` renders a coherent landscape: the surface fills the frame, no sky, no streaks,
-  no slivers.
+* `terrain_gen` renders a coherent landscape: the surface is unbroken -- no streaks, no
+  slivers, no holes.  It does not fill the frame.  The visible region is finite
+  (`VisibleRegionSize_32`) and the camera sits 100 units off the target
+  (`examples/terrain_gen/game.cpp:128`), so the horizon is in shot and everything above it is
+  `Graphics->SkyColor` (`V3(0.001f, 0.001f, 0.35f)`, used as the framebuffer clear at
+  `src/engine/render.cpp:358`) -- that dark blue is the sky, not an unrendered region.  Geometry
+  detached from the surface is likewise expected here, and is a property of the shaping rule
+  rather than the renderer: these rules write a density into `Output.a` that is not monotonic in
+  z, so a column can be filled in more than one separated z span.  `7_steep_ravines` adds
+  `500 - Basis.z` to a remapped `Square(gradient_noise(...))` of amplitude 300, which does
+  exactly that.  A blob in this scene is therefore something to check against the shaping rule
+  in use, not against the renderer.
 * `examples/macos_smoketest/` renders its hand-written scene coherently -- ground slab,
   staircase, column, ridge -- with ~3-4% of the frame as geometry and no holes or torn edges.
   That example exists precisely so this claim is checkable: it defines the world by hand
