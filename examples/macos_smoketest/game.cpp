@@ -169,8 +169,15 @@ BONSAI_API_MAIN_THREAD_INIT_CALLBACK()
   world_position WorldCenter = World_Position(0, 0, 0);
   AllocateWorld(World, WorldCenter, SMOKETEST_WORLD_SIZE);
 
-  chunk_completion_callback CompletionCallback = SmokeTestChunkCompletion;
-  Push(&Resources->ChunkCompletionCallbacks, &CompletionCallback);
+  // NOTE(nsillik): SMOKETEST_ENGINE_NOISE=1 leaves the voxels to the engine's own GPU-noise path
+  // instead of writing them by hand.  That is the control for "is the renderer wrong, or is the
+  // world wrong": this example's own voxels render correctly, so if the engine's noise does not,
+  // the difference is in world generation rather than in the renderer.
+  if (getenv("SMOKETEST_ENGINE_NOISE") == 0)
+  {
+    chunk_completion_callback CompletionCallback = SmokeTestChunkCompletion;
+    Push(&Resources->ChunkCompletionCallbacks, &CompletionCallback);
+  }
 
   // NOTE(nsillik): Pin the lighting.  Left on, the sun moves with accumulated wall-clock time and
   // two runs of the same binary produce different frames.
