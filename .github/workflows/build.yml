@@ -4,8 +4,10 @@ on:
   push:
     tags: ["*"]
     branches: [ "master", "develop" ]
+  # NOTE(nsillik): No `branches` filter here.  It matches the *base* branch, so a filter of
+  # ["develop"] means a pull request against master -- or against another PR's branch, as in a
+  # stack -- reports "no checks reported" instead of running.
   pull_request:
-    branches: [ "develop" ]
 
 jobs:
 
@@ -35,6 +37,35 @@ jobs:
           CHANGELOG.txt
 
   
+  build-macos:
+    # An Apple Silicon runner, which is the machine the port was developed against.  The build
+    # cross-targets x86_64 (the SIMD layer is SSE/AVX-only; see docs/01_build_process.md), so
+    # everything it produces has to run under Rosetta -- including the test binaries RunTests
+    # executes.  On an arm64 runner Rosetta is not installed by default.
+    runs-on: macos-14
+    steps:
+    - name: Install Rosetta
+      run: sudo softwareupdate --install-rosetta --agree-to-license
+    - uses: actions/checkout@v3
+    - name: Checkout submodules
+      run: git submodule update --init --recursive
+    - name: Build
+      run: ./make.sh
+    - name: Test
+      run: ./make.sh RunTests
+    - name: Tar
+      if: startsWith(github.ref, 'refs/tags/')
+      run:  ./make.sh BundleRelease
+    - name: Release
+      uses: softprops/action-gh-release@v1
+      if: startsWith(github.ref, 'refs/tags/')
+      with:
+        prerelease: true
+        files: |
+          macOS_x86_64_release.tar.gz
+          LICENSE
+          CHANGELOG.txt
+
   build-and-release-windows:
     runs-on: windows-latest
     steps:
