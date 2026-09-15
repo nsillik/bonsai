@@ -48,6 +48,7 @@ BONSAI_INTERNAL='-D BONSAI_INTERNAL=1'
 EXAMPLES_TO_BUILD=""
 
 BUNDLED_EXAMPLES="
+  $EXAMPLES/macos_smoketest
   $EXAMPLES/blank_project
   $EXAMPLES/turn_based
   $EXAMPLES/the_wanderer
@@ -394,9 +395,11 @@ SetBuildAllFlags() {
   BuildExecutables=1
   BuildTests=1
 
+  # NOTE(nsillik)(macos): Now also built on macOS; the one test in the list needed the
+  # Darwin spelling of the sigcontext (src/tests/allocation.cpp).
   # NOTE(Jesse): These only build on linux.  I'm honestly not sure if it's
   # worth getting them to build on Windows
-  if [ $Platform == "Linux" ]; then
+  if [ $Platform == "Linux" ] || [ $Platform == "macOS" ]; then
     BuildDebugOnlyTests=1
   fi
 
