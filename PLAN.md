@@ -150,7 +150,14 @@ bump the `external/bonsai_stdlib` gitlink in `bonsai` → CI goes green.
 ### Repository layout
 
 All work happens in forks. **Nothing is pushed to `scallyw4g/*`** — verified: zero branches matching
-`port/` and zero PRs authored there.
+`port/` on either upstream, and no *open* PR authored there.
+
+One correction to that attestation, found when the phase 3 branches were pushed: there **is** a
+closed PR on `scallyw4g/bonsai` — [#8](https://github.com/scallyw4g/bonsai/pull/8), "Add posix stubs
+for `PlatformInitializeAudio` and `PlatformPinCurrentThreadToCore`", from `nsillik:port/macos`, opened
+and closed on 2026-09-14 before this session. It is closed, nothing is open against upstream, and
+`AGENTS.md` says not to touch anything owned by someone else, so it is recorded here and left alone.
+`scallyw4g/bonsai_stdlib` has no PRs at all.
 
 | Remote | `bonsai` | `external/bonsai_stdlib` |
 |---|---|---|
@@ -181,8 +188,8 @@ master
 | `bonsai_stdlib` | `port/macos` | `6b80224` | [#1](https://github.com/nsillik/bonsai_stdlib/pull/1) |
 | `bonsai_stdlib` | `port/macos-phase1` | `82974dc` | [#2](https://github.com/nsillik/bonsai_stdlib/pull/2) |
 | `bonsai_stdlib` | `port/macos-phase2` | `a7d2dd3` | [#3](https://github.com/nsillik/bonsai_stdlib/pull/3) |
-| `bonsai` | `port/macos-phase3` | `c4832943` | **none — not pushed yet** |
-| `bonsai_stdlib` | `port/macos-phase3` | `930f51e` | **none — not pushed yet** |
+| `bonsai` | `port/macos-phase3` | `c2b32422` | **pushed, no PR yet** |
+| `bonsai_stdlib` | `port/macos-phase3` | `930f51e` | **pushed, no PR yet** |
 | `bonsai_debug` | `port/macos-phase2` | `b6ceecb` | **none — deliberate** |
 
 **`bonsai_debug` is a third fork, and is deliberately not a PR.** Phase 2 needed one change there
