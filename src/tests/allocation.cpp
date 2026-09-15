@@ -61,8 +61,8 @@ SegfaultHandler(int sig, siginfo_t *si, void *data)
   // REG_RIP on Linux.
   //
   // TODO(nsillik)(macos): arm64 spells this __ss.__pc.  This build is x86_64 only (see
-  // the -target in scripts/setup_for_cxx.sh), so that spelling is deliberately not
-  // guessed at here.
+  // the -target in external/bonsai_stdlib/scripts/setup_for_cxx.sh), so that spelling is
+  // deliberately not guessed at here.
   uc->uc_mcontext->__ss.__rip += instruction_length;
 #else
   uc->uc_mcontext.gregs[REG_RIP] += instruction_length;

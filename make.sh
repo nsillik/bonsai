@@ -129,7 +129,6 @@ function BuildDebugOnlyTests
 
 function BuildTests
 {
-  rm -Rf bin/tests/ && mkdir bin/tests
   echo ""
   ColorizeTitle "Tests"
   for executable in $TESTS_TO_BUILD; do
@@ -190,6 +189,16 @@ function BuildWithClang
   echo -e "$Delimeter"
 
   [[ $BuildExecutables == 1     || $BUILD_EVERYTHING == 1 ]] && BuildExecutables
+
+  # NOTE(nsillik)(macos): The wipe lives here, not in BuildTests, because every compile below is
+  # backgrounded (see TrackPid) and only waited on at WaitForTrackedPids.  From inside BuildTests
+  # it therefore ran *after* the debug-only test compiles had been launched, and could delete a
+  # binary one of them had already written -- reachable now that BuildDebugOnlyTests is enabled on
+  # macOS.  Wiping first removes the ordering dependence.
+  if [[ $BuildTests == 1 || $BUILD_EVERYTHING == 1 ]]; then
+    rm -Rf bin/tests/ && mkdir bin/tests
+  fi
+
   [[ $BuildDebugOnlyTests == 1  || $BUILD_EVERYTHING == 1 ]] && BuildDebugOnlyTests
   [[ $BuildTests == 1           || $BUILD_EVERYTHING == 1 ]] && BuildTests
   [[ $BuildExamples == 1        || $BUILD_EVERYTHING == 1 ]] && BuildExamples

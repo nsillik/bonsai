@@ -22,8 +22,8 @@ Two readings of "the platform" run through the whole document:
 ## What the backend is
 
 `external/bonsai_stdlib/src/platform/macos/macos_platform.{h,cpp}`, reached from the platform
-dispatch in `src/platform.{h,cpp}` -- the same shape as the Linux backend, and the only new
-backend file.  It owns:
+dispatch in `external/bonsai_stdlib/src/platform.{h,cpp}` -- the same shape as the Linux
+backend, and the only new backend file.  It owns:
 
 | Piece | Note |
 |---|---|
@@ -58,7 +58,7 @@ equivalents available at 4.10.  Each site carries a `NOTE(nsillik)(macos)`.
 | `gl_DrawID` in that shader | `uniform int DrawIndex`, uploaded per draw | same |
 | `layout(std430) readonly buffer WorldEditOpBuffer` | the same treatment, 17 texels (272 bytes) | `shaders/terrain/world_edit.fragmentshader` |
 | `glMultiDrawArraysIndirect` over a draw list | `SubmitDrawList`: one `glDrawArrays` + one `glUniform1i` per entry | `src/engine/render.cpp` |
-| `#version 460 core` | `#version 410 core` on macOS only | `src/engine/shader.cpp` |
+| `#version 460 core` | `#version 410 core` on macOS only | `external/bonsai_stdlib/src/shader.cpp` (`CompileShaderPair`) |
 | `glGenerateTextureMipmap` | `glGenerateMipmap` on the target already bound (identical semantics; the DSA form only names the texture) | `external/bonsai_stdlib/src/ui/ui.cpp` |
 
 A texture buffer is the right substitute for a std430 block because it imposes no layout at
@@ -155,10 +155,12 @@ and `MultiDrawIndirect` became `SubmitDrawList`.
 
 ### Two readback traps, which is why `FlushStdout` exists
 
-1. `CheckNoiseReadbackJobs` maps a pixel-pack buffer and left it bound.  The next
+1. `CheckNoiseReadbackJobs` maps a pixel-pack buffer and left it bound.  Any later
    *client-pointer* `glReadPixels` is then a silent `GL_INVALID_OPERATION` that writes
-   nothing, which reads as "the renderer drew nothing".  It now unbinds after mapping;
-   unbinding does not unmap.
+   nothing, which reads as "the renderer drew nothing".  No caller in the tree does that --
+   the only other `glReadPixels` binds its own pack buffer first -- but the frame-capture
+   harness used to verify the port does, and it is what made that harness's first comparison
+   show zero pixels.  It now unbinds after mapping; unbinding does not unmap.
 2. `RuntimeBreak` did not flush `log.txt` before trapping.  `stdout` is unbuffered but the
    `log.txt` mirror is a buffered `stdio` stream, so a trap loses it: measured, `log.txt` is
    **empty** after a trap without the flush, not merely truncated.  The first attempt lost
@@ -181,12 +183,13 @@ and `MultiDrawIndirect` became `SubmitDrawList`.
   `macos_platform.h` renames the SDK's typedef for the duration of the imports.  The rename
   has to span every import that can reach `MacTypes.h` first -- it only gets one chance, since
   the header is include-guarded.
-* **`gl.cpp`'s loader no longer *requires* 4.3/4.5 entry points.**  Eight symbols
+* **`gl.cpp`'s loader no longer *requires* 4.3/4.5 entry points.**  Nine symbols
   (`glMultiDrawArraysIndirect`, `glBindTextures`, `glBufferStorage`, `glDebugMessageCallback`,
-  `glGetQueryBufferObject{iv,uiv,i64v,ui64v}`, `glGenerateTextureMipmap`) are still loaded,
-  but not ANDed into `Initialized`, because a 4.1 context lacks them and nothing calls them.
-  They are listed in one place at the top of `InitializeOpenglFunctions`.  This is smaller than
-  deleting the typdefs, the struct fields and the load sites, and it does not remove API.
+  the four `glGetQueryBufferObject{iv,uiv,i64v,ui64v}`, `glGenerateTextureMipmap`) are still
+  loaded, but not ANDed into `Initialized`, because a 4.1 context lacks them and nothing calls
+  them.  They are listed in one place at the top of `InitializeOpenglFunctions`.  This is
+  smaller than deleting the typdefs, the struct fields and the load sites, and it does not
+  remove API.
 * **`PlatformInitializeAudio` and `PlatformPinCurrentThreadToCore` now exist for posix.**
   Shared code calls both unconditionally and only win32 defined them, so Linux and macOS both
   failed to link.  Not macOS-specific; it was the pre-existing CI breakage.
@@ -236,7 +239,9 @@ cross-targeted and run under Rosetta 2.
 Rendering is measured from the engine's own back buffer, not from screenshots.  A frame is
 grabbed just before `BonsaiSwapBuffers` by binding framebuffer 0, reading the viewport rect
 with `glReadPixels` and writing a BMP -- the pack-buffer and read-back-buffer notes in
-§Silent failures apply.  With that:
+§Silent failures apply.  That harness is not checked in, so the results below are not
+reproducible from this branch without rewriting it; a like-for-like Linux frame has not been
+diffed (see Known gaps).  With that:
 
 * `terrain_gen` renders a coherent landscape: the surface fills the frame, no sky, no streaks,
   no slivers.

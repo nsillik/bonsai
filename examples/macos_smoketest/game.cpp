@@ -12,9 +12,8 @@
 // voxel's material data (FinalizeOccupancyMasksFromNoiseValues).  ChunkCompletionCallbacks are
 // invoked on that buffer *before* it is finalized, which is the hook used here: every value written
 // below is a pure function of the voxel's world position.  So the voxels are identical on macOS and
-// Linux with no dependence on noise, GPU float behaviour, seeds or timing; neighbouring chunks agree
-// and the chunk seams (where the mesh boundaries are) are exercised; and with the day/night cycle
-// off and tDay pinned the frames differ only by rendering.
+// Linux with no dependence on noise, GPU float behaviour, seeds or timing, and with the day/night
+// cycle off and tDay pinned the frames differ only by rendering.
 //
 // The scene is chosen to be readable in one screenshot:
 //
@@ -34,8 +33,11 @@
 #include <bonsai_types.h>
 #include <game_types.h>
 
-// NOTE(nsillik): A 1-chunk visible region, so the world is 8 chunks and settles immediately.  The
-// pattern spans several chunks regardless, because it is keyed off world position.
+// NOTE(nsillik): The smallest visible region there is, so the world settles immediately.  It is
+// one 64^3 chunk, not a grid of them: the root node's resolution is the visible region, and
+// OctreeLeafShouldSplit only splits a node whose resolution exceeds V3i(1).  The whole pattern
+// fits in that chunk, which is why it can be compared frame-for-frame without chunk streaming
+// being a variable.
 #define SMOKETEST_WORLD_SIZE VisibleRegionSize_1
 
 // Ground slab: z in [0, SMOKETEST_GROUND_THICKNESS).
@@ -189,7 +191,9 @@ BONSAI_API_MAIN_THREAD_INIT_CALLBACK()
   Graphics->Settings.DrawMajorGrid = False;
   Graphics->Settings.DrawMinorGrid = False;
 
-  StandardCamera(Graphics->Camera, 10000.f, 1000.f, 1.f);
+  // NOTE(nsillik): No StandardCamera call here.  SnapCameraToCenterOfWorld issues one itself
+  // (5000000 far clip, 50000 distance) and StandardCamera starts with `*Camera = {}`, so anything
+  // set here would be discarded a line later.
   SnapCameraToCenterOfWorld(Resources, SMOKETEST_WORLD_SIZE);
 
   // Look down at the scene from far enough that the whole pattern is in frame.

@@ -837,9 +837,13 @@ SetupRenderToTextureShader(engine_resources *Engine, texture *Texture, camera *C
       GetGL()->BindFramebuffer(GL_FRAMEBUFFER, RTTGroup->FBO.ID);
       GetGL()->BindTexture(GL_TEXTURE_2D, Texture->ID);
 
-      // NOTE(nsillik)(macos): The reset stays because this framebuffer is re-pointed at a
-      // *different* image on every call.  Re-attaching an image that is already attached is the
-      // hazard -- see the note in render_init.cpp's Terrain Decoration block.
+      // NOTE(nsillik)(macos): The reset stays because Attachments is a running *counter*, not a
+      // description of what is attached: FramebufferTexture attaches to COLOR_ATTACHMENT0 +
+      // Attachments and then increments it.  This framebuffer is re-pointed at a new image on
+      // every call, so without the reset the second call would attach to slot 1 and
+      // SetDrawBuffers would turn both slots on -- one image on two draw buffers, which Apple's
+      // GL answers by discarding every fragment.  See the note in render_init.cpp's Terrain
+      // Decoration block.
       RTTGroup->FBO.Attachments = 0;
       FramebufferTexture(&RTTGroup->FBO, Texture);
       SetDrawBuffers(&RTTGroup->FBO);
@@ -1716,6 +1720,14 @@ SubmitDrawList(u32 DrawCount, draw_arrays_command *Draws, render_matrix_pair *Ma
   // std430 block in gBuffer.vertexshader.  A texture buffer is the same data read as texels,
   // and is available on the 4.1 core context macOS caps at, where shader storage buffers are
   // not.
+  //
+  // NOTE(nsillik): This binds by *name*, against whatever program is currently bound -- both
+  // here and for DrawIndex below.  The invariant is therefore that the caller has the
+  // gBuffer shader bound, which is the only program that declares either.  Every caller
+  // satisfies it, but not by construction: RenderDrawList ignores its Shader parameter and
+  // relies on the render command stream having emitted SetupShader first.  A draw list whose
+  // command names a different shader (the ShadowMap one, say) would trap here rather than
+  // draw anything, which is what the two asserts below are for.
   BindTextureBuffer(&TransformBufferBinding, "TransformBuffer", MatrixData, RequiredMatrixBufferSize);
 
   {
@@ -1761,6 +1773,13 @@ link_internal void
 RenderDrawList(engine_resources *Engine, octree_node_ptr_paged_list *DrawList, shader *Shader, camera *Camera)
 {
   auto GL = GetGL();
+
+  // NOTE(nsillik): `Shader` is unused, and deliberately so -- the draws below go through
+  // SubmitDrawList, which resolves TransformBuffer and DrawIndex against whatever program is
+  // bound.  Keeping the parameter is what lets the render command carry the shader it means,
+  // and binding it here is the obvious "fix" if a second draw-list consumer ever appears; it
+  // is not done today because the only other one (the ShadowMap list) passes Camera == 0 and
+  // so accumulates no draws at all -- see below.
 
   // TODO(Jesse): Turn this into an assert; there's no reason to have a draw command with an empty draw list!
   if (DrawList->ElementCount == 0) return;
@@ -1821,6 +1840,12 @@ RenderDrawList(engine_resources *Engine, octree_node_ptr_paged_list *DrawList, s
           Basis += GetSimSpaceP(World, Chunk->WorldP);
         }
 
+        // NOTE(nsillik): Every DrawCount++ lives under this `if (Camera)`, so a draw list
+        // submitted without a camera accumulates nothing and SubmitDrawList is skipped by the
+        // `if (DrawCount)` below.  That is load-bearing and easy to miss: the ShadowMap list
+        // is pushed alongside this one for the same chunks and its render command passes
+        // Camera == 0, which is why it never issues a draw (and why it never reaches
+        // SubmitDrawList's asserts, whose program does not declare its uniforms).
         if (Camera)
         {
           if (Chunk->OcclusionQueryId == 0)

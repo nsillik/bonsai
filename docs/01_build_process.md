@@ -27,10 +27,11 @@ Two things about the macOS build are worth knowing before reading a diff:
 
 * **It cross-targets x86_64 and runs under Rosetta 2.**  The SIMD layer is SSE/AVX-only, and
   `-mssse3 -mavx -mavx2 -mfma` are hard errors for an arm64 target, so
-  `scripts/setup_for_cxx.sh` passes `-target x86_64-apple-macos11`.  On Apple Silicon the
-  binaries are therefore x86_64 and are executed through Rosetta; installing it is part of
-  the `build-macos` CI job for the same reason.  Anything that inspects the *host* arch, or
-  reads `_SC_PAGESIZE` under Rosetta, is looking at the translation, not the machine.
+  `external/bonsai_stdlib/scripts/setup_for_cxx.sh` passes
+  `-target x86_64-apple-macos11`.  On Apple Silicon the binaries are therefore x86_64 and
+  are executed through Rosetta; installing it is part of the `build-macos` CI job for the
+  same reason.  Anything that inspects the *host* arch, or reads `_SC_PAGESIZE` under
+  Rosetta, is looking at the translation, not the machine.
 * **Every file is compiled as Objective-C++** (`-x objective-c++`), because the engine is one
   translation unit per target and `platform/macos/macos_platform.cpp` uses AppKit directly.
   There is no `.mm` shim.  Objective-C++ is a superset of C++, so nothing else in the tree
