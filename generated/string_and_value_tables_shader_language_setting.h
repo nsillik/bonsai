@@ -11,6 +11,8 @@ IsValid(shader_language_setting Value)
   {
             case ShaderLanguageSetting_460core:
 
+        case ShaderLanguageSetting_410core:
+
         case ShaderLanguageSetting_330core:
 
         case ShaderLanguageSetting_310es:
@@ -40,6 +42,8 @@ ToStringPrefixless(shader_language_setting Type)
 
             case ShaderLanguageSetting_310es: { Result = CSz("310es"); } break;
 
+            case ShaderLanguageSetting_410core: { Result = CSz("410core"); } break;
+
             
 
 
@@ -68,6 +72,8 @@ ToString(shader_language_setting Type)
 
         case ShaderLanguageSetting_310es: { Result = CSz("ShaderLanguageSetting_310es"); } break;
 
+        case ShaderLanguageSetting_410core: { Result = CSz("ShaderLanguageSetting_410core"); } break;
+
         
 
 
@@ -82,7 +88,8 @@ ShaderLanguageSetting(counted_string S)
 {
   shader_language_setting Result = {};
 
-    if (StringsMatch(S, CSz("ShaderLanguageSetting_460core"))) { return ShaderLanguageSetting_460core; }
+    if (StringsMatch(S, CSz("ShaderLanguageSetting_410core"))) { return ShaderLanguageSetting_410core; }
+  if (StringsMatch(S, CSz("ShaderLanguageSetting_460core"))) { return ShaderLanguageSetting_460core; }
   if (StringsMatch(S, CSz("ShaderLanguageSetting_330core"))) { return ShaderLanguageSetting_330core; }
   if (StringsMatch(S, CSz("ShaderLanguageSetting_310es"))) { return ShaderLanguageSetting_310es; }
   if (StringsMatch(S, CSz("ShaderLanguageSetting_default"))) { return ShaderLanguageSetting_default; }

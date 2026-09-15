@@ -745,6 +745,12 @@ GraphicsInit(graphics *Result, engine_settings *EngineSettings, memory_arena *Gr
 
     GetGL()->BindFramebuffer(GL_FRAMEBUFFER, TerrainDecorationRC->DestFBO->ID);
 
+    // NOTE(nsillik)(macos): This framebuffer is one of WorldEditRC's ping-pong targets and
+    // already has its texture on attachment 0, so re-attaching it is a no-op rather than a
+    // second slot (see FramebufferTexture, and the note on struct framebuffer).  Before that
+    // was fixed the same image landed on two draw buffers, which Apple's GL answers by
+    // silently discarding every fragment of every draw into it -- no GL error,
+    // GL_FRAMEBUFFER_COMPLETE -- and is what left terrain_gen with a nearly-empty world.
     FramebufferTexture(TerrainDecorationRC->DestFBO, TerrainDecorationRC->DestTex);
     SetDrawBuffers(TerrainDecorationRC->DestFBO);
 

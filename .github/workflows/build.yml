@@ -4,8 +4,10 @@ on:
   push:
     tags: ["*"]
     branches: [ "master", "develop" ]
+  # No `branches` filter: it matches the *base* branch, so a stacked PR whose
+  # base is an intermediate branch (e.g. port/macos) would start no jobs at all.
+  # Each PR in a stack needs its own CI run.
   pull_request:
-    branches: [ "develop" ]
 
 jobs:
 
@@ -15,8 +17,9 @@ jobs:
     - uses: actions/checkout@v3
     - name: Checkout submodules
       run: git submodule update --init --recursive
+    - uses: jdx/mise-action@v3
     - name: Install Deps
-      run: sudo apt update && sudo apt install freeglut3-dev libx11-dev clang
+      run: mise bootstrap packages apply --yes && mise install
     - name: Build
       run: ./make.sh
     - name: Test
@@ -65,3 +68,21 @@ jobs:
           Windows_x86_64_release.tar.gz
           LICENSE
           CHANGELOG.txt
+
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+    - uses: actions/checkout@v3
+    - name: Checkout submodules
+      run: git submodule update --init --recursive
+    # The macos-* runners are arm64 and do not ship Rosetta 2, but this build
+    # cross-compiles to x86_64 (the SIMD layer is SSE/AVX-only), so the binaries
+    # cannot be run -- and RunTests cannot pass -- without it.
+    - name: Install Rosetta
+      run: sudo softwareupdate --install-rosetta --agree-to-license
+    - uses: jdx/mise-action@v3
+    - name: Build
+      run: ./make.sh
+    - name: Test
+      run: ./make.sh RunTests

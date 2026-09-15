@@ -675,21 +675,23 @@ DrainLoRenderQueue(engine_resources *Engine)
 
                     auto GL = GetGL();
 
-                    s32 MaxFragShaderTexUnits = 0;
-                    GL->GetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS_ARB, &MaxFragShaderTexUnits);
-
-                    local_persist u32 OpStorageBuffer = 0;
-                    if (OpStorageBuffer == 0) { GL->GenBuffers(1, &OpStorageBuffer); }
-
-                    GL->BindBuffer(GL_SHADER_STORAGE_BUFFER, OpStorageBuffer);
-                    AssertNoGlErrors;
-
-                    GL->BufferData(GL_SHADER_STORAGE_BUFFER, Cast(u32, sizeof(world_edit_op))*Cast(u32, AtOpIndex), Ops, GL_DYNAMIC_DRAW);
-                    AssertNoGlErrors;
-
-                    GL->BindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, OpStorageBuffer);
-
                     BindUniformByName(Program, "OpCount", AtOpIndex);
+
+                    // NOTE(nsillik)(macos): This was a glBindBufferBase(GL_SHADER_STORAGE_BUFFER)
+                    // feeding a std430 block, which needs GL 4.3.  A texture buffer is the same
+                    // memory read as 16-byte texels and works on the 4.1 core context macOS caps at.
+                    //
+                    // It takes SHADER_TEXTURE_BUFFER_UNIT, which is above every unit the samplers
+                    // above were handed.  TexUnit is 0 for InputTex and one more per colour layer,
+                    // with MAX_BRUSH_LAYERS == 16 possible layers, so unit 15 is exactly reachable
+                    // at the maximum.  A collision would silently rebind the sampler to the wrong
+                    // texture, so it is asserted rather than left to chance.
+                    Assert(TexUnit <= SHADER_TEXTURE_BUFFER_UNIT);
+
+                    {
+                      local_persist texture_buffer_binding OpBufferBinding = {};
+                      BindTextureBuffer(&OpBufferBinding, "WorldEditOpBuffer", Ops, Cast(umm, sizeof(world_edit_op))*Cast(umm, AtOpIndex));
+                    }
 
                  rect3 SimEditRect = GetSimSpaceRect(World, Edit->Region);
                     v3 SimChunkMin = GetSimSpaceP(World, Chunk->WorldP);
@@ -874,6 +876,13 @@ CheckNoiseReadbackJobs(engine_resources *Engine, graphics *Graphics, platform *P
         GetGL()->BindBuffer(GL_PIXEL_PACK_BUFFER, PBOJob->PBOBuf.PBO);
         AssertNoGlErrors;
         u32 *NoiseValues = Cast(u32*, GetGL()->MapBuffer(GL_PIXEL_PACK_BUFFER, GL_READ_ONLY));
+        AssertNoGlErrors;
+
+        // NOTE(nsillik)(macos): Unbind immediately.  A pack buffer left bound turns the next
+        // client-pointer glReadPixels into a silent GL_INVALID_OPERATION that writes nothing,
+        // which reads as "the renderer drew nothing" rather than as an error.  Unbinding does
+        // not unmap: the mapping stays valid until UnmapBuffer.
+        GetGL()->BindBuffer(GL_PIXEL_PACK_BUFFER, 0);
         AssertNoGlErrors;
 
         auto BuildMeshJob = WorkQueueEntry(WorkQueueEntryFinalizeNoiseValues(PBOJob->PBOBuf, NoiseValues, PBOJob->NoiseDim, PBOJob->DestNode));
