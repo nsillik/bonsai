@@ -38,11 +38,17 @@ jobs:
 
   
   build-macos:
-    # An Apple Silicon runner, which is the machine the port was developed against.  The build
-    # cross-targets x86_64 (the SIMD layer is SSE/AVX-only; see docs/01_build_process.md), so
-    # everything it produces has to run under Rosetta -- including the test binaries RunTests
-    # executes.  On an arm64 runner Rosetta is not installed by default.
-    runs-on: macos-14
+    # An Apple Silicon runner.  The build cross-targets x86_64 (the SIMD layer is SSE/AVX-only;
+    # see docs/01_build_process.md), so everything it produces has to run under Rosetta --
+    # including the test binaries RunTests executes.  On an arm64 runner Rosetta is not installed
+    # by default.
+    #
+    # NOT macos-14.  Its Rosetta does not implement AVX2/FMA, and every x86_64 binary this tree
+    # builds contains both: `otool -tv bin/tests/m4` is full of vpermps, vfmadd231ss and
+    # vbroadcastss.  There the Test step does not fail a suite, it dies before printing anything
+    # -- `Illegal instruction: 4` in all ten.  Rosetta gained AVX2 after Sonoma, so this job
+    # needs an image newer than the one it started on; macos-26 is the floor, not a preference.
+    runs-on: macos-26
     steps:
     - name: Install Rosetta
       run: sudo softwareupdate --install-rosetta --agree-to-license
