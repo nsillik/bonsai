@@ -4,7 +4,9 @@
 ## Prebuilt Binaries
 
 The fastest way to get started with Bonsai is to grab the prebuilt binaries from
-the [Latest Releases](../../releases/latest) page.  Windows and Linux are supported.
+the [Latest Releases](../../releases/latest) page.  Windows and Linux binaries
+are published there; macOS builds from source, see
+[Building the Engine](01_build_process.md).
 
 
 ## Running an Example

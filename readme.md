@@ -43,7 +43,8 @@ and a few appropriate system headers.
 ## Quickstart
 
 Grab pre-built binaries & assets from the [Latest Releases](../../releases/latest)
-for your platform of your choice (as long as your platform of choice is Windows or Linux) ;)
+for your platform of your choice.  Prebuilt binaries are published for Windows
+and Linux; macOS builds from source, see [Building the Engine](docs/01_build_process.md).
 
 ### [Getting Started](docs/00_getting_started.md)
 
