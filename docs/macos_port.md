@@ -128,9 +128,9 @@ is not merely a portability fix: `DrawArraysIndirectCommand` became `draw_arrays
   name.  `macos_platform.h` renames the SDK's typedef for the duration of the imports, and the
   rename has to span every import that can reach `MacTypes.h` first -- the header is
   include-guarded, so it only gets one chance.
-* **`gl.cpp`'s loader does not *require* 4.3/4.5 entry points.**  Nine symbols that a 4.1
-  context lacks are still loaded but not ANDed into `Initialized`, because nothing calls them.
-  They are listed in one place at the top of `InitializeOpenglFunctions`.
+* **`gl.cpp` no longer loads 4.3/4.5 entry points nothing calls.**  The nine a 4.1 context
+  lacks are gone -- loader, typedef and `opengl` member -- rather than left loaded and
+  ungated, because a member that is never assigned compiles and dereferences null.
 * **`PlatformInitializeAudio` and `PlatformPinCurrentThreadToCore` exist for posix.**  Shared
   code calls both unconditionally and only win32 defined them, so Linux and macOS both failed
   to link.
