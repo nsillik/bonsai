@@ -48,6 +48,7 @@ BONSAI_INTERNAL='-D BONSAI_INTERNAL=1'
 EXAMPLES_TO_BUILD=""
 
 BUNDLED_EXAMPLES="
+  $EXAMPLES/macos_smoketest
   $EXAMPLES/blank_project
   $EXAMPLES/turn_based
   $EXAMPLES/the_wanderer
@@ -128,7 +129,6 @@ function BuildDebugOnlyTests
 
 function BuildTests
 {
-  rm -Rf bin/tests/ && mkdir bin/tests
   echo ""
   ColorizeTitle "Tests"
   for executable in $TESTS_TO_BUILD; do
@@ -189,6 +189,14 @@ function BuildWithClang
   echo -e "$Delimeter"
 
   [[ $BuildExecutables == 1     || $BUILD_EVERYTHING == 1 ]] && BuildExecutables
+
+  # NOTE(nsillik)(macos): Wiped here rather than in BuildTests, because every compile below is
+  # backgrounded (TrackPid) and only waited on at WaitForTrackedPids: a wipe inside BuildTests ran
+  # after the debug-only compiles had started, and could delete what one of them had written.
+  if [[ $BuildTests == 1 || $BUILD_EVERYTHING == 1 ]]; then
+    rm -Rf bin/tests/ && mkdir bin/tests
+  fi
+
   [[ $BuildDebugOnlyTests == 1  || $BUILD_EVERYTHING == 1 ]] && BuildDebugOnlyTests
   [[ $BuildTests == 1           || $BUILD_EVERYTHING == 1 ]] && BuildTests
   [[ $BuildExamples == 1        || $BUILD_EVERYTHING == 1 ]] && BuildExamples
@@ -394,9 +402,10 @@ SetBuildAllFlags() {
   BuildExecutables=1
   BuildTests=1
 
-  # NOTE(Jesse): These only build on linux.  I'm honestly not sure if it's
-  # worth getting them to build on Windows
-  if [ $Platform == "Linux" ]; then
+  # NOTE(nsillik)(macos): Built on macOS too now; the one test in the list needed the Darwin
+  # spelling of the sigcontext (src/tests/allocation.cpp).
+  # NOTE(Jesse): I'm honestly not sure it's worth getting these to build on Windows
+  if [ $Platform == "Linux" ] || [ $Platform == "macOS" ]; then
     BuildDebugOnlyTests=1
   fi
 

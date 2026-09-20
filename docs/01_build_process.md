@@ -11,6 +11,35 @@ not work for you, by all means open an issue and I will do what I can to assist.
 
 Follow the instructions for fetching dependencies for bonsai_stdlib [https://github.com/scallyw4g/bonsai_stdlib/blob/master/docs/dependencies.md](https://github.com/scallyw4g/bonsai_stdlib/blob/master/docs/dependencies.md)
 
+## macOS
+
+The only toolchain dependency is the Xcode Command Line Tools, `xcode-select --install`;
+Cocoa, OpenGL and IOKit come from the SDK.
+
+```bash
+git clone --recursive https://github.com/scallyw4g/bonsai bonsai && cd bonsai
+./make.sh && ./make.sh RunTests
+./bin/game_loader ./bin/game_libs/terrain_gen_loadable.dylib
+```
+
+Two things about the macOS build are worth knowing before reading a diff:
+
+* **It cross-targets x86_64 and runs under Rosetta 2.**  The SIMD layer is SSE/AVX-only, and
+  `-mssse3 -mavx -mavx2 -mfma` are hard errors for an arm64 target, so
+  `external/bonsai_stdlib/scripts/setup_for_cxx.sh` passes
+  `-target x86_64-apple-macos11`.  On Apple Silicon the binaries are therefore x86_64 and
+  are executed through Rosetta; installing it is part of the `build-macos` CI job for the
+  same reason.
+* **Every file is compiled as Objective-C++** (`-x objective-c++`), because the engine is one
+  translation unit per target and `platform/macos/macos_platform.cpp` uses AppKit directly.
+  Objective-C++ is a superset of C++ meaning there should be no effect.
+
+The macOS backend drives a **4.1 core** GL context, which is the highest macOS offers.  A few
+GL 4.3/4.5 features are therefore unavailable; where that changed the code (rather than just
+the loader), the site carries a `NOTE(nsillik)(macos)` explaining it.
+
+See [macos_port.md](macos_port.md) for the port itself.
+
 ## Quickstart
 
 ```

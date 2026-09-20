@@ -678,16 +678,19 @@ DrainLoRenderQueue(engine_resources *Engine)
                     s32 MaxFragShaderTexUnits = 0;
                     GL->GetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS_ARB, &MaxFragShaderTexUnits);
 
-                    local_persist u32 OpStorageBuffer = 0;
-                    if (OpStorageBuffer == 0) { GL->GenBuffers(1, &OpStorageBuffer); }
+                    // NOTE(nsillik)(macos): A texture buffer where this fed a std430 block, which
+                    // needs GL 4.3.  See docs/macos_port.md.
+                    //
+                    // It takes the last fragment texture unit.  TexUnit is a count, so this
+                    // admits units 0..14 and the TBO takes 15: 14 colour layers, one fewer than
+                    // the std430 block allowed, while MAX_BRUSH_LAYERS is 16.  A collision would
+                    // rebind a sampler rather than fail, so it traps.
+                    Assert(TexUnit <= SHADER_TEXTURE_BUFFER_UNIT);
 
-                    GL->BindBuffer(GL_SHADER_STORAGE_BUFFER, OpStorageBuffer);
-                    AssertNoGlErrors;
-
-                    GL->BufferData(GL_SHADER_STORAGE_BUFFER, Cast(u32, sizeof(world_edit_op))*Cast(u32, AtOpIndex), Ops, GL_DYNAMIC_DRAW);
-                    AssertNoGlErrors;
-
-                    GL->BindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, OpStorageBuffer);
+                    {
+                      local_persist texture_buffer_binding OpBufferBinding = {};
+                      BindTextureBuffer(&OpBufferBinding, "WorldEditOpBuffer", Ops, Cast(umm, sizeof(world_edit_op))*Cast(umm, AtOpIndex));
+                    }
 
                     BindUniformByName(Program, "OpCount", AtOpIndex);
 
@@ -874,6 +877,13 @@ CheckNoiseReadbackJobs(engine_resources *Engine, graphics *Graphics, platform *P
         GetGL()->BindBuffer(GL_PIXEL_PACK_BUFFER, PBOJob->PBOBuf.PBO);
         AssertNoGlErrors;
         u32 *NoiseValues = Cast(u32*, GetGL()->MapBuffer(GL_PIXEL_PACK_BUFFER, GL_READ_ONLY));
+        AssertNoGlErrors;
+
+        // NOTE(nsillik)(macos): Unbind immediately.  A pack buffer left bound turns any later
+        // *client-pointer* glReadPixels into a silent GL_INVALID_OPERATION that writes nothing,
+        // which reads as "the renderer drew nothing".  Unbinding does not unmap; the mapping
+        // stays valid until UnmapBuffer, which is what the worker does with it.
+        GetGL()->BindBuffer(GL_PIXEL_PACK_BUFFER, 0);
         AssertNoGlErrors;
 
         auto BuildMeshJob = WorkQueueEntry(WorkQueueEntryFinalizeNoiseValues(PBOJob->PBOBuf, NoiseValues, PBOJob->NoiseDim, PBOJob->DestNode));

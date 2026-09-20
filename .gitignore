@@ -24,3 +24,8 @@ build/*
 breakpoints
 
 .vscode/*
+
+# NOTE(nsillik)(macos): ./make.sh and the test suites emit both; clang writes a .dSYM bundle
+# beside every binary on macOS.
+log.txt
+*.dSYM/
